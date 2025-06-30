@@ -35,11 +35,18 @@ add_subdirectory(third_party/pugixml)
 
 ## TinyObj
 add_library(tinyobjloader third_party/tinyobjloader/tiny_obj_loader.cpp)
-target_include_directories(tinyobjloader PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(tinyobjloader PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/tinyobjloader)
 
 ## TinyPly
-add_library(tinyply third_party/tinyply/tinyply.cpp)
-target_include_directories(tinyply PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+add_library(tinyply STATIC third_party/tinyply/tinyply.cpp)
+target_include_directories(tinyply PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/tinyply)
+
+## STB
+add_library(stb
+    third_party/stb/stb_image_write.cpp
+    third_party/stb/stb_image.cpp
+)
+target_include_directories(stb PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb)
 
 ## GLM
 set(GLM_BUILD_LIBRARY OFF CACHE BOOL "" FORCE)
@@ -66,6 +73,7 @@ add_library(imgui STATIC
 target_include_directories(imgui PUBLIC
     third_party/imgui
 )
+target_compile_definitions(imgui PRIVATE IMGUI_IMPL_VULKAN_USE_VOLK)
 target_link_libraries(imgui volk glfw)
 
 ## Vulkan Memory Allocator
@@ -87,6 +95,7 @@ else()
 endif()
 
 target_link_libraries(${CMAKE_PROJECT_NAME}
+    stb
     glfw
     glm::glm
     tinyply
