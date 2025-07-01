@@ -47,7 +47,7 @@ Image Image::LoadFromFile(const fs::path &filename) {
         int width, height, channels;
         float *data = stbi_loadf(filename.string().c_str(), &width, &height, &channels, 3);
         if (data == nullptr) {
-            ERROR(std::format("Failure loading image '{}'.", filename.string()));
+            PT_ERROR(std::format("Failure loading image '{}'.", filename.string()));
         }
 
         Image image(width, height);
@@ -61,7 +61,7 @@ Image Image::LoadFromFile(const fs::path &filename) {
         stbi_image_free(data);
         return image;
     } else {
-        ERROR(std::format("Unsupported file format for file '{}'", filename.string()));
+        PT_ERROR(std::format("Unsupported file format for file '{}'", filename.string()));
     }
 }
 

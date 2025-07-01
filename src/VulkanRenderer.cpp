@@ -1,7 +1,10 @@
+#include "platform.h"
+
 #include "VulkanRenderer.h"
 #include "exception.h"
 #include "utils.h"
-#include "vulkan/vulkan_core.h"
+#include <cuda_runtime_api.h>
+#include <driver_types.h>
 #include <format>
 #include <iostream>
 #include <limits>
@@ -32,8 +35,9 @@ VulkanRenderer::~VulkanRenderer() {
     ImGui::DestroyContext();
 
     DestroyPerFrameData();
+    DestroyCudaObjects();
+
     vkDestroyCommandPool(m_context.device, m_context.command_pool, nullptr);
-    
     vkDestroyDescriptorPool(m_context.device, m_ui.descriptor_pool, nullptr);
 
     if (m_props.enable_present) {
@@ -53,23 +57,13 @@ VulkanRenderer::~VulkanRenderer() {
 }
 
 std::optional<Frame> VulkanRenderer::BeginFrame() {
-    ASSERT(m_current_frame < m_swapchain_image_count, "Invalid frame number!");
+    PT_ASSERT(m_current_frame < m_swapchain_image_count, "Invalid frame number!");
 
     const PerFrameData &frame = m_frame_data[m_current_frame];
 
     // Create new swapchain on resize
     if (m_context.resize_requested) {
-        vkDeviceWaitIdle(m_context.device);
-
-        int width, height;
-        glfwGetWindowSize(m_window, &width, &height);
-        m_window_extent.width = width;
-        m_window_extent.height = height;
-
-        m_context.resize_requested = false;
-        DestroyPerFrameData();
-        CreateSwapChain(m_window_extent);
-        CreatePerFrameData();
+        ResizeSwapChain();
         return std::nullopt;
     }
 
@@ -103,9 +97,9 @@ std::optional<Frame> VulkanRenderer::BeginFrame() {
     VkCommandBufferBeginInfo command_buffer_begin_info {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
         .pNext = nullptr,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
         .pInheritanceInfo = nullptr,
     };
-
     vkBeginCommandBuffer(frame.command_buffer, &command_buffer_begin_info);
     
     return Frame {
@@ -229,17 +223,45 @@ void VulkanRenderer::EndFrame() {
 
     // Submit and present. Hide latency by using semaphores
 
+    uint64_t wait_value = m_frame_counter * 2 + 2;
+    uint64_t signal_value = m_frame_counter * 2 + 3;
+
+    std::vector<VkSemaphore> wait_semaphores {
+        m_context.cuda_semaphore,
+        frame.swapchain_acquire_semaphore,
+    };
+    std::vector<VkPipelineStageFlags> wait_stages {
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+    };
+    std::vector<VkSemaphore> signal_semaphores {
+        m_context.cuda_semaphore,
+        frame.draw_complete_semaphore,
+    };
+
+    std::vector<uint64_t> wait_values = { wait_value, 0 };
+    std::vector<uint64_t> signal_values = { signal_value, 0 };
+
     VkPipelineStageFlags dst_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+
+    VkTimelineSemaphoreSubmitInfo timeline {
+        .sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO,
+        .waitSemaphoreValueCount = 2,
+        .pWaitSemaphoreValues = wait_values.data(),
+        .signalSemaphoreValueCount = 2,
+        .pSignalSemaphoreValues = signal_values.data(),
+    };
+
     VkSubmitInfo graphics_submit {
         .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-        .pNext = nullptr,
-        .waitSemaphoreCount = 1,
-        .pWaitSemaphores = &frame.swapchain_acquire_semaphore,
-        .pWaitDstStageMask = &dst_stage,
+        .pNext = &timeline,
+        .waitSemaphoreCount = static_cast<uint32_t>(wait_semaphores.size()),
+        .pWaitSemaphores = wait_semaphores.data(),
+        .pWaitDstStageMask = wait_stages.data(),
         .commandBufferCount = 1,
         .pCommandBuffers = &frame.command_buffer,
-        .signalSemaphoreCount = 1,
-        .pSignalSemaphores = &frame.draw_complete_semaphore,
+        .signalSemaphoreCount = static_cast<uint32_t>(signal_semaphores.size()),
+        .pSignalSemaphores = signal_semaphores.data(),
     };
     VK_CHECK(vkQueueSubmit(m_context.graphics_queue, 1, &graphics_submit, frame.render_fence));
 
@@ -259,6 +281,7 @@ void VulkanRenderer::EndFrame() {
         VK_CHECK(res);
     }
 
+    m_frame_counter++;
     m_current_frame = (m_current_frame + 1) % m_swapchain_image_count;
 }
 
@@ -323,7 +346,7 @@ void VulkanRenderer::EndRenderingUI() {
 void VulkanRenderer::Draw() {
     const PerFrameData &frame = m_frame_data[m_current_frame];
 
-    // Transition draw image to VK_GENERAL
+    // Transition draw image to TRANSFER_DST_OPTIMAL 
     {
         VkImageSubresourceRange image_range = {
             .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
@@ -335,7 +358,7 @@ void VulkanRenderer::Draw() {
 
         VkImageMemoryBarrier2 image_barrier {
             .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-            .dstStageMask = VK_PIPELINE_STAGE_2_CLEAR_BIT | VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+            .dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
             .dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
             .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
             .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
@@ -352,30 +375,43 @@ void VulkanRenderer::Draw() {
         vkCmdPipelineBarrier2(frame.command_buffer, &dependency_info);
     }
 
-    VkImageSubresourceRange range {
-        .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-        .baseMipLevel = 0,
-        .levelCount = 1,
-        .baseArrayLayer = 0,
-        .layerCount = 1,
-    };
+    // VkImageSubresourceRange range {
+    //     .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+    //     .baseMipLevel = 0,
+    //     .levelCount = 1,
+    //     .baseArrayLayer = 0,
+    //     .layerCount = 1,
+    // };
 
-    VkClearColorValue color {
-        .float32 = { 0,0,0, 1.0f },
+    // VkClearColorValue color {
+    //     .float32 = { 0,0,0, 1.0f },
+    // };
+    // vkCmdClearColorImage(frame.command_buffer, frame.draw_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &color, 1, &range);
+
+    VkBufferImageCopy copy {
+        .bufferOffset = 0,
+        .bufferRowLength = 0,   // tightly packed
+        .bufferImageHeight = 0,
+        .imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+        .imageExtent = {
+            m_context.swapchain_extent.width,
+            m_context.swapchain_extent.height,
+            1
+        }
     };
-    vkCmdClearColorImage(frame.command_buffer, frame.draw_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &color, 1, &range);
+    vkCmdCopyBufferToImage(frame.command_buffer, m_draw_buffer, frame.draw_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
 }
 
 void VulkanRenderer::InitGLFW() {
     if (!glfwInit())
-        ERROR("Error initializing GLFW!");
+        PT_ERROR("Error initializing GLFW!");
 
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
 
     m_window = glfwCreateWindow(m_window_extent.width, m_window_extent.height, "Path Tracer", nullptr, nullptr);
     if (!m_window) {
-        ERROR("Error creating GLFW window!");
+        PT_ERROR("Error creating GLFW window!");
     }
 }
 
@@ -399,9 +435,11 @@ void VulkanRenderer::InitVulkan() {
     }
 
     CreatePerFrameData();
+    CreateCudaObjects();
 }
 
 void VulkanRenderer::InitImGui() {
+    IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO &io = ImGui::GetIO();
 
@@ -444,45 +482,98 @@ void VulkanRenderer::InitImGui() {
     };
 
     ImGui_ImplVulkan_Init(&init_info);
+}
 
-    // Upload font textures
-    // {
-    //     VkCommandBufferAllocateInfo alloc{
-    //         .sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-    //         .commandPool        = m_context.,  // any pool resettable per frame
-    //         .level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-    //         .commandBufferCount = 1
-    //     };
+void VulkanRenderer::ResizeSwapChain() {
+    vkDeviceWaitIdle(m_context.device);
 
-    //     VkCommandBuffer cmd;
-    //     VK_CHECK(vkAllocateCommandBuffers(m_context.device, &alloc, &cmd));
+    int width, height;
+    glfwGetWindowSize(m_window, &width, &height);
+    m_window_extent.width = width;
+    m_window_extent.height = height;
 
-    //     const VkCommandBufferBeginInfo begin{
-    //         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-    //         .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
-    //     };
-    //     vkBeginCommandBuffer(cmd, &begin);
+    m_context.resize_requested = false;
+    DestroyPerFrameData();
+    DestroyCudaObjects();
 
-    //     // ImGui backend records the font upload here
-    //     // ImGui_ImplVulkan_CreateFontsTexture(cmd);
+    CreateSwapChain(m_window_extent);
+    CreatePerFrameData();
+    m_frame_counter = 0;
+    m_current_frame = 0;
+    CreateCudaObjects();
+}
 
-    //     // ImTextureData data;
-    //     // ImGui_ImplVulkan_CreateFontsTexture(&data)
+void VulkanRenderer::CreateCudaObjects() {
+    const VkDeviceSize buffer_size = m_context.swapchain_extent.width * m_context.swapchain_extent.height * 4;
 
-    //     vkEndCommandBuffer(cmd);
+    // Create Vulkan Buffer
+    VkExternalMemoryBufferCreateInfo external_buffer_info {
+        .sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO,
+#ifdef PLATFORM_WINDOWS
+        .handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT,
+#elif defined(PLATFORM_LINUX)
+        .handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT,
+#endif
+    };
 
-    //     // Submit and wait (simplest path)
-    //     VkSubmitInfo submit{
-    //         .sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-    //         .commandBufferCount = 1,
-    //         .pCommandBuffers    = &cmd
-    //     };
-    //     VK_CHECK(vkQueueSubmit(m_context.graphics_queue, 1, &submit, VK_NULL_HANDLE));
-    //     VK_CHECK(vkQueueWaitIdle(m_context.graphics_queue));
+    VkBufferCreateInfo buffer_info {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .pNext = &external_buffer_info,
+        .size = buffer_size,
+        .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+    };
 
-    //     vkFreeCommandBuffers(m_context.device, m_context.device_cmd_pool, 1, &cmd);
-    //     ImGui_ImplVulkan_DestroyFontUploadObjects(); // cleanup staging resources
-    // }
+    VmaAllocationCreateInfo allocation {
+        .flags = VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT,
+        .usage = VMA_MEMORY_USAGE_AUTO,
+    };
+
+    uint32_t memory_type_index = 0;
+    VK_CHECK(vmaFindMemoryTypeIndexForBufferInfo(
+        m_context.allocator,
+        &buffer_info,          // VkBufferCreateInfo
+        &allocation,           // VmaAllocationCreateInfo (flags, usage, etc)
+        &memory_type_index
+    ));
+    
+    // Must create a VMA memory pool to allow for exportable memory
+    // for use with CUDA
+    // See: https://gpuopen-librariesandsdks.github.io/VulkanMemoryAllocator/html/other_api_interop.html
+    VmaPoolCreateInfo pool_create_info {
+        .memoryTypeIndex = memory_type_index,
+        .pMemoryAllocateNext = (void *) &m_context.export_alloc_info,
+    };
+    vmaCreatePool(m_context.allocator, &pool_create_info, &m_context.exportable_pool);
+
+    VmaAllocationInfo allocation_info;
+    allocation.pool = m_context.exportable_pool;
+    vmaCreateBuffer(m_context.allocator, &buffer_info, &allocation, &m_draw_buffer, &m_draw_allocation, &allocation_info);
+    
+    // Get memory and semaphore to CUDA
+    m_cuda_context.external_memory = ImportCudaExternalMemory(m_context.device, allocation_info.deviceMemory, buffer_size);
+
+    cudaExternalMemoryBufferDesc buffer_desc = {
+        .offset = 0,
+        .size = buffer_size,
+    };
+    CUDA_CHECK(cudaExternalMemoryGetMappedBuffer(&m_cuda_ptr, m_cuda_context.external_memory, &buffer_desc));
+
+    std::tie(m_cuda_context.external_semaphore, m_context.cuda_semaphore) = ImportCudaExternalSemaphore(m_context.device);
+
+    VkSemaphoreSignalInfo signal_info {
+        .sType     = VK_STRUCTURE_TYPE_SEMAPHORE_SIGNAL_INFO,
+        .semaphore = m_context.cuda_semaphore,
+        .value     = 1
+    };
+    VK_CHECK(vkSignalSemaphore(m_context.device, &signal_info));
+}
+
+void VulkanRenderer::DestroyCudaObjects() {
+    CUDA_CHECK(cudaDestroyExternalMemory(m_cuda_context.external_memory));
+    CUDA_CHECK(cudaDestroyExternalSemaphore(m_cuda_context.external_semaphore));
+    vkDestroySemaphore(m_context.device, m_context.cuda_semaphore, nullptr);
+    vmaDestroyBuffer(m_context.allocator, m_draw_buffer, m_draw_allocation);
+    vmaDestroyPool(m_context.allocator, m_context.exportable_pool);
 }
 
 void VulkanRenderer::CreatePerFrameData() {
@@ -645,6 +736,7 @@ void VulkanRenderer::DestroyPerFrameData() {
     }
 
     vkDestroyRenderPass(m_context.device, m_ui.render_pass, nullptr);
+
 }
 
 void VulkanRenderer::InitVulkanInstance() {
@@ -682,7 +774,7 @@ void VulkanRenderer::InitVulkanInstance() {
     {
         uint32_t extension_count = 0;
         VK_CHECK(vkEnumerateInstanceExtensionProperties(nullptr, &extension_count, nullptr));
-        assert(extension_count > 0);
+        PT_QASSERT(extension_count > 0);
     
         std::vector<VkExtensionProperties> supported_extensions(extension_count);
         VK_CHECK(vkEnumerateInstanceExtensionProperties(nullptr, &extension_count, supported_extensions.data()));
@@ -695,7 +787,7 @@ void VulkanRenderer::InitVulkanInstance() {
                 }
             }
 
-            ERROR(std::format("Required extension unavailable: {}", extension_name));
+            PT_ERROR(std::format("Required extension unavailable: {}", extension_name));
         };
         
         for (auto &ext : requested_extensions) {
@@ -708,7 +800,7 @@ void VulkanRenderer::InitVulkanInstance() {
     {
         uint32_t layer_count = 0;
         VK_CHECK(vkEnumerateInstanceLayerProperties(&layer_count, nullptr));
-        assert(layer_count > 0);
+        PT_QASSERT(layer_count > 0);
     
         std::vector<VkLayerProperties> supported_layers(layer_count);
         VK_CHECK(vkEnumerateInstanceLayerProperties(&layer_count, supported_layers.data()));
@@ -721,7 +813,7 @@ void VulkanRenderer::InitVulkanInstance() {
                 }
             }
 
-            ERROR(std::format("Required layer unavailable: {}", layer_name));
+            PT_ERROR(std::format("Required layer unavailable: {}", layer_name));
         };
         
         for (auto &layer : requested_layers) {
@@ -809,6 +901,17 @@ void VulkanRenderer::InitVulkanDevice() {
         requested_extensions.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
     }
 
+    requested_extensions.push_back(VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME);
+    requested_extensions.push_back(VK_KHR_EXTERNAL_SEMAPHORE_EXTENSION_NAME);
+
+#ifdef PLATFORM_WINDOWS
+    requested_extensions.push_back(VK_KHR_EXTERNAL_MEMORY_WIN32_EXTENSION_NAME);
+    requested_extensions.push_back(VK_KHR_EXTERNAL_SEMAPHORE_WIN32_EXTENSION_NAME);
+#else
+    requested_extensions.push_back(VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME);
+    requested_extensions.push_back(VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME);
+#endif
+
     if (!has13) {
         requested_extensions.push_back(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME);
     }
@@ -817,38 +920,52 @@ void VulkanRenderer::InitVulkanDevice() {
 
     uint32_t device_count = 0;
     vkEnumeratePhysicalDevices(m_context.instance, &device_count, nullptr);
-    assert(device_count > 0);
+    PT_QASSERT(device_count > 0);
 
     std::vector<VkPhysicalDevice> physical_devices(device_count);
     VK_CHECK(vkEnumeratePhysicalDevices(m_context.instance, &device_count, physical_devices.data()));
+
+    std::cout << "Available devices: " << std::endl;
+    for (auto device : physical_devices) {
+        VkPhysicalDeviceProperties properties;
+        vkGetPhysicalDeviceProperties(device, &properties);
+
+        std::cout << " - " << properties.deviceName << std::endl;
+    }
 
     VkPhysicalDevice best_device = VK_NULL_HANDLE;
     int best_score = -1;
 
     // Very simple selection algorithm to try to bias discrete GPUs
-    std::cout << "Available devices: " << std::endl;
-    for (const auto& device : physical_devices) {
-        VkPhysicalDeviceProperties properties;
-        VkPhysicalDeviceFeatures features;
-        vkGetPhysicalDeviceProperties(device, &properties);
-        vkGetPhysicalDeviceFeatures(device, &features);
+    uint32_t device_group_count;
+    vkEnumeratePhysicalDeviceGroups(m_context.instance, &device_group_count, nullptr);
 
-        int score = 0;
+    std::vector<VkPhysicalDeviceGroupProperties> device_groups(device_group_count);
+    vkEnumeratePhysicalDeviceGroups(m_context.instance, &device_group_count, device_groups.data());
 
-        if (properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
-            score += 1000;
-        } else if (properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU) {
-            score += 100;
+    for (const auto &group : device_groups) {
+        // For CUDA interop, we require that the found device is the only one in its group
+        // See: https://docs.nvidia.com/cuda/cuda-c-programming-guide/#matching-device-uuids
+        if (group.physicalDeviceCount == 1) {
+            VkPhysicalDeviceProperties properties;
+            VkPhysicalDeviceFeatures features;
+            vkGetPhysicalDeviceProperties(group.physicalDevices[0], &properties);
+            vkGetPhysicalDeviceFeatures(group.physicalDevices[0], &features);
+
+            int score = 0;
+            if (properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
+                score += 1000;
+            } else if (properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU) {
+                score += 100;
+            }
+
+            score += static_cast<int>(properties.limits.maxImageDimension2D);
+
+            if (score > best_score) {
+                best_score = score;
+                best_device = group.physicalDevices[0];
+            }
         }
-
-        score += static_cast<int>(properties.limits.maxImageDimension2D);
-
-        if (score > best_score) {
-            best_score = score;
-            best_device = device;
-        }
-
-        std::cout << " - " << properties.deviceName << std::endl;
     }
 
     VkPhysicalDeviceProperties device_properties;
@@ -864,7 +981,7 @@ void VulkanRenderer::InitVulkanDevice() {
     {
         uint32_t queue_family_count = 0;
         vkGetPhysicalDeviceQueueFamilyProperties(m_context.physical_device, &queue_family_count, nullptr);
-        NASSERT(queue_family_count > 0);
+        PT_QASSERT(queue_family_count > 0);
     
         std::vector<VkQueueFamilyProperties> queue_families(queue_family_count);
         vkGetPhysicalDeviceQueueFamilyProperties(m_context.physical_device, &queue_family_count, queue_families.data());
@@ -881,7 +998,7 @@ void VulkanRenderer::InitVulkanDevice() {
             }
         }
 
-        ASSERT(m_context.graphics_queue_family != std::numeric_limits<uint32_t>::max(), "Cannot find a queue with both present and graphics capability!");
+        PT_ASSERT(m_context.graphics_queue_family != std::numeric_limits<uint32_t>::max(), "Cannot find a queue with both present and graphics capability!");
 
         float queue_priority = 1.0f;
         VkDeviceQueueCreateInfo queue_create_info {
@@ -910,7 +1027,7 @@ void VulkanRenderer::InitVulkanDevice() {
                 }
             }
 
-            ERROR(std::format("Required extension unavailable: {}", extension_name));
+            PT_ERROR(std::format("Required extension unavailable: {}", extension_name));
         };
         
         for (auto &ext : requested_extensions) {
@@ -926,6 +1043,7 @@ void VulkanRenderer::InitVulkanDevice() {
     std::vector<VkBaseOutStructure *> feature_chain;
     VkPhysicalDeviceVulkan12Features feat12 = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
+        .timelineSemaphore = VK_TRUE,
         .bufferDeviceAddress = VK_TRUE,
     };
 
@@ -997,18 +1115,18 @@ void VulkanRenderer::InitVulkanDevice() {
     };
 
     const std::vector<VkFormat> color_candidates = {
-        VK_FORMAT_B8G8R8A8_UNORM,
-        VK_FORMAT_B8G8R8A8_SRGB
+        VK_FORMAT_R8G8B8A8_UNORM,
+        VK_FORMAT_R8G8B8A8_SRGB
     };
     m_image_formats.color = pick_supported_format(color_candidates, VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT);
-    ASSERT(m_image_formats.color != VK_FORMAT_UNDEFINED, "Cannot find valid color format!");
+    PT_ASSERT(m_image_formats.color != VK_FORMAT_UNDEFINED, "Cannot find valid color format!");
     
     const std::vector<VkFormat> hdr_color_candidates = {
         VK_FORMAT_R16G16B16A16_SFLOAT,
         VK_FORMAT_A2B10G10R10_UNORM_PACK32,
     };
     m_image_formats.hdr = pick_supported_format(hdr_color_candidates, VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT);
-    ASSERT(m_image_formats.hdr != VK_FORMAT_UNDEFINED, "Cannot find valid hdr format!");
+    PT_ASSERT(m_image_formats.hdr != VK_FORMAT_UNDEFINED, "Cannot find valid hdr format!");
 }
 
 void VulkanRenderer::InitSwapChain() {
@@ -1026,14 +1144,14 @@ void VulkanRenderer::CreateSwapChain(const VkExtent2D &extent) {
     {
         uint32_t surface_formats_count = 0;
         VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(m_context.physical_device, m_context.surface, &surface_formats_count, nullptr));
-        NASSERT(surface_formats_count > 0);
+        PT_QASSERT(surface_formats_count > 0);
 
         std::vector<VkSurfaceFormatKHR> surface_formats(surface_formats_count);
         VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(m_context.physical_device, m_context.surface, &surface_formats_count, surface_formats.data()));
     
         bool found = false;
         for (const auto &format : surface_formats) {
-            if (format.format == VK_FORMAT_B8G8R8A8_SRGB && format.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+            if (format.format == VK_FORMAT_R8G8B8A8_SRGB && format.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
                 swapchain_format = format;
                 found = true;
                 break;
@@ -1050,7 +1168,7 @@ void VulkanRenderer::CreateSwapChain(const VkExtent2D &extent) {
     {
         uint32_t present_modes_count = 0;
         VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(m_context.physical_device, m_context.surface, &present_modes_count, nullptr));
-        NASSERT(present_modes_count > 0);
+        PT_QASSERT(present_modes_count > 0);
     
         std::vector<VkPresentModeKHR> present_modes(present_modes_count);
         VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(m_context.physical_device, m_context.surface, &present_modes_count, present_modes.data()));
@@ -1119,8 +1237,8 @@ void VulkanRenderer::CreateSwapChain(const VkExtent2D &extent) {
         .oldSwapchain = old_swapchain,
     };
 
-    NASSERT(surface_capabilities.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
-    NASSERT(surface_capabilities.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_DST_BIT);
+    PT_QASSERT(surface_capabilities.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
+    PT_QASSERT(surface_capabilities.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_DST_BIT);
 
     swapchain_create_info.imageUsage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
     swapchain_create_info.imageUsage |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;

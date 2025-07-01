@@ -21,7 +21,7 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 find_package(Vulkan REQUIRED)
 
 ## CUDA
-include_directories("${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES}")
+find_package(CUDAToolkit REQUIRED)
 
 ## GLFW
 set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
@@ -56,6 +56,9 @@ add_subdirectory(third_party/glm)
 
 ## Volk
 add_subdirectory(third_party/volk)
+if (WIN32)
+    target_compile_definitions(volk PRIVATE VK_USE_PLATFORM_WIN32_KHR)
+endif()
 
 ## ImGui
 set(IMGUI_SRCS
@@ -85,6 +88,7 @@ file(GLOB_RECURSE CORE_SOURCES CONFIGURE_DEPENDS
     src/*.cpp src/*.cu src/*.h)
 
 add_executable(${CMAKE_PROJECT_NAME} ${CORE_SOURCES})
+
 set_target_properties(${CMAKE_PROJECT_NAME} PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
 if(CMAKE_VERSION VERSION_LESS "3.23.0")
     set_target_properties(${CMAKE_PROJECT_NAME} PROPERTIES CUDA_ARCHITECTURES OFF)
@@ -95,6 +99,8 @@ else()
 endif()
 
 target_link_libraries(${CMAKE_PROJECT_NAME}
+    CUDA::cudart
+    CUDA::cuda_driver
     stb
     glfw
     glm::glm
@@ -108,4 +114,6 @@ target_link_libraries(${CMAKE_PROJECT_NAME}
 target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE "$<$<AND:$<CONFIG:Debug,RelWithDebInfo>,$<COMPILE_LANGUAGE:CUDA>>:-G;-src-in-ptx>")
 target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE "$<$<AND:$<CONFIG:Release>,$<COMPILE_LANGUAGE:CUDA>>:-lineinfo;-src-in-ptx>")
 
+
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT ${CMAKE_PROJECT_NAME})
+

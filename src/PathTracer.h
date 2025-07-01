@@ -1,18 +1,14 @@
 #pragma once
 
-#include "VulkanRenderer.h"
-
-struct PathTracerProperties {
-    RendererProperties renderer_properties;
-};
+#include <vector_types.h>
+#include <volk.h>
 
 class PathTracer {
 public:
-    PathTracer(const PathTracerProperties &props);
+    PathTracer(const VkExtent2D &extent);
+    ~PathTracer() = default;
 
-    void Run();
+    void PathTrace(uchar4 *pbo);
 private:
-    const PathTracerProperties &m_props;
-    uint32_t m_iteration = 0;
-    VulkanRenderer m_renderer;
+    const VkExtent2D &m_extent;
 };

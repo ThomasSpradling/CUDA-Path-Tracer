@@ -1,5 +1,7 @@
 #pragma once
 
+#include "platform_select.h"
+#include <driver_types.h>
 #include <volk.h>
 // #define IMGUI_IMPL_VULKAN_USE_VOLK
 #include <backends/imgui_impl_glfw.h>
@@ -37,6 +39,16 @@ public:
     ~VulkanRenderer();
 
     GLFWwindow *GetWindow() const { return m_window; }
+    VmaAllocator GetAllocator() const { return m_context.allocator; }
+
+    int GetFrameCounter() const { return m_frame_counter; }
+    const cudaExternalSemaphore_t &GetCudaSemaphore() const { return m_cuda_context.external_semaphore; }
+    
+    const VkExtent2D &GetExtent() const { return m_context.swapchain_extent; }
+
+    VkDevice GetVulkanDevice() const { return m_context.device; }
+
+    void *GetCudaPtr() const { return m_cuda_ptr; }
 
     void Draw();
 
@@ -52,18 +64,35 @@ private:
 
         VkPhysicalDevice physical_device = VK_NULL_HANDLE;
         VkDevice device = VK_NULL_HANDLE;
-        VmaAllocator allocator = VK_NULL_HANDLE;
         VkQueue graphics_queue = VK_NULL_HANDLE;
         uint32_t graphics_queue_family = std::numeric_limits<uint32_t>::max();
         // VkDescriptorPool descriptor_pool = VK_NULL_HANDLE;
-
+        
         VkSurfaceKHR surface = VK_NULL_HANDLE;
         VkSwapchainKHR swapchain = VK_NULL_HANDLE;
         VkExtent2D swapchain_extent;
         bool resize_requested = false;
         VkCommandPool command_pool = VK_NULL_HANDLE;
-
+        
         std::vector<VkImage> swapchain_images;
+        
+        constexpr static VkExportMemoryAllocateInfo export_alloc_info {
+            .sType = VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO,
+#ifdef PLATFORM_WINDOWS
+            .handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT,
+#elif defined(PLATFORM_LINUX)
+            .handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT,
+#endif
+        };
+        VmaAllocator allocator = VK_NULL_HANDLE;
+        VmaPool exportable_pool = nullptr;
+
+        VkSemaphore cuda_semaphore;
+    };
+
+    struct CudaContext {
+        cudaExternalMemory_t external_memory = nullptr;
+        cudaExternalSemaphore_t external_semaphore = nullptr;
     };
 
     struct PerFrameData {
@@ -87,43 +116,28 @@ private:
         VkDescriptorPool descriptor_pool = VK_NULL_HANDLE;
         std::vector<VkFramebuffer> frame_buffers;
         VkRenderPass render_pass = VK_NULL_HANDLE;
-
-        // VkDescriptorSetLayout descriptor_set_layout = VK_NULL_HANDLE;
-        // VkDescriptorSet descriptor_set = VK_NULL_HANDLE;
-
-        // VkPipelineLayout pipeline_layout = VK_NULL_HANDLE;
-        // VkPipeline pipeline = VK_NULL_HANDLE;
-
-        // VkImage font_texture_image = VK_NULL_HANDLE;
-        // VkSampler font_texture_sampler = VK_NULL_HANDLE;
-        // VkImageView font_texture_view = VK_NULL_HANDLE;
-        // VmaAllocation font_texture_allocation = nullptr;
-
-        // VkBuffer vertex_buffer = VK_NULL_HANDLE;
-        // VmaAllocation vertex_buffer_allocation = nullptr;
-
-        // VkBuffer index_buffer = VK_NULL_HANDLE;
-        // VmaAllocation index_buffer_allocation = nullptr;
     };
-
-    // struct VulkanProperties {
-    //     VkFormat m_color_format;
-    //     VkFormat m_hdr_format;
-    // };
 private:
     const RendererProperties &m_props;
     // uint32_t m_iteration = 1;
 
     uint32_t m_swapchain_image_index = 0;
     uint32_t m_swapchain_image_count = 0;
+
+    int m_frame_counter = 0;
     uint32_t m_current_frame = 0;
 
     ImageFormats m_image_formats;
 
+    CudaContext m_cuda_context {};
     VulkanContext m_context {};
     ImGuiContext m_ui {};
 
     std::vector<PerFrameData> m_frame_data {};
+
+    VkBuffer m_draw_buffer;
+    VmaAllocation m_draw_allocation;
+    void *m_cuda_ptr = nullptr;
 
     GLFWwindow *m_window;
     VkExtent2D m_window_extent;
@@ -132,7 +146,11 @@ private:
     void InitGLFW();
     void InitVulkan();
     void InitImGui();
-    // void InitCUDA();
+
+    void ResizeSwapChain();
+    
+    void CreateCudaObjects();
+    void DestroyCudaObjects();
 
     void InitVulkanInstance();
     void InitVulkanDevice();

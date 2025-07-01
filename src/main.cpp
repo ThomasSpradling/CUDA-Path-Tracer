@@ -1,13 +1,8 @@
-#include "PathTracer.h"
-#include "exception.h"
+#include "PathTracerApplication.h"
 #include <exception>
 #include <iostream>
+
 int main(int argc, char *argv[]) {
-
-    // Initialize CUDA and OpenGL
-
-    // GLFW Main Loop
-
     PathTracerProperties properties {
         .renderer_properties = {
             .vulkan_version = VK_MAKE_API_VERSION(0, 1, 3, 0),
@@ -18,10 +13,16 @@ int main(int argc, char *argv[]) {
         }
     };
 
+    // if (argc < 2) {
+    //     std::cout << "Usage: " << argv[0] << " [ scene_file ]" << std::endl;
+    //     return 1;
+    // }
+
+
+
     try {
-        PathTracer path_tracer(properties);
+        PathTracerApplication path_tracer(properties);
         path_tracer.Run();
-        
     } catch (const std::exception &e) {
         std::cerr << e.what() << std::endl;
         return 1;
