@@ -6,7 +6,6 @@
 #include <stdexcept>
 #include <cuda_runtime.h>
 #include <driver_types.h>
-#include <format>
 
 class Exception : public std::runtime_error {
 public:
@@ -28,18 +27,18 @@ private:
 #define PT_ERROR(arg) throw Exception(arg, __FILE__, __LINE__);
 
 #define PT_QASSERT(expr) \
-    if (!(expr)) PT_ERROR(std::format("Assertion failed:\n\t {}", #expr));
+    if (!(expr)) PT_ERROR("Assertion failed:\n\t " + std::string(#expr));
 
 #define PT_ASSERT(expr, arg) \
-    if (!(expr)) PT_ERROR(std::format("Assertion failed:\n\t {} -- {}", #expr, arg));
+    if (!(expr)) PT_ERROR("Assertion failed:\n\t " + std::string(#expr) + " -- " + std::string(arg));
 
 #define VK_CHECK(expr) \
     if (VkResult result = (expr); result != VK_SUCCESS) { \
-        PT_ERROR(std::format("Call '{}' returned {}.", #expr, string_VkResult(result))); \
+        PT_ERROR("Call '" + std::string(#expr) + "' returned " + std::string(string_VkResult(result)) + "."); \
     }
 
 #define CUDA_CHECK(expr) \
     if (cudaError_t err = (expr); err != cudaSuccess) { \
-        PT_ERROR(std::format("Call '{}' returned {}.", #expr, cudaGetErrorString(err))); \
+        PT_ERROR("Call '" + std::string(#expr) + "' returned " + std::string(cudaGetErrorString(err)) + "."); \
     }
 

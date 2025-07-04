@@ -33,3 +33,11 @@ inline bool SupportsApiVersion(uint32_t actual_version, uint32_t requested_versi
     uint32_t requested_patch = VK_API_VERSION_MINOR(requested_version);
     return actual_patch >= requested_patch;
 }
+
+inline std::string CurrentTimeString() {
+    time_t now;
+    time(&now);
+    char buf[sizeof "0000-00-00_00-00-00z"];
+    strftime(buf, sizeof buf, "%Y-%m-%d_%H-%M-%Sz", gmtime(&now));
+    return std::string(buf);
+}

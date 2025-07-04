@@ -24,6 +24,7 @@ VulkanRenderer::VulkanRenderer(const RendererProperties &props)
     VK_CHECK(volkInitialize());
     InitGLFW();
     InitVulkan();
+    InitCUDA();
     InitImGui();
 }
 
@@ -54,6 +55,9 @@ VulkanRenderer::~VulkanRenderer() {
         vkDestroyDebugUtilsMessengerEXT(m_context.instance, m_context.debug_messenger, nullptr);
     }
     vkDestroyInstance(m_context.instance, nullptr);
+
+    glfwDestroyWindow(m_window);
+    glfwTerminate();
 }
 
 std::optional<Frame> VulkanRenderer::BeginFrame() {
@@ -128,12 +132,9 @@ void VulkanRenderer::EndFrame() {
             .pNext = nullptr,
             .srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
             .srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-            // .srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-            // .srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
             .dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
             .dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT,
             .oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-            // .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
             .newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
             .image = frame.draw_image,
             .subresourceRange = image_range,
@@ -375,19 +376,6 @@ void VulkanRenderer::Draw() {
         vkCmdPipelineBarrier2(frame.command_buffer, &dependency_info);
     }
 
-    // VkImageSubresourceRange range {
-    //     .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-    //     .baseMipLevel = 0,
-    //     .levelCount = 1,
-    //     .baseArrayLayer = 0,
-    //     .layerCount = 1,
-    // };
-
-    // VkClearColorValue color {
-    //     .float32 = { 0,0,0, 1.0f },
-    // };
-    // vkCmdClearColorImage(frame.command_buffer, frame.draw_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &color, 1, &range);
-
     VkBufferImageCopy copy {
         .bufferOffset = 0,
         .bufferRowLength = 0,   // tightly packed
@@ -407,7 +395,7 @@ void VulkanRenderer::InitGLFW() {
         PT_ERROR("Error initializing GLFW!");
 
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
+    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
 
     m_window = glfwCreateWindow(m_window_extent.width, m_window_extent.height, "Path Tracer", nullptr, nullptr);
     if (!m_window) {
@@ -436,6 +424,34 @@ void VulkanRenderer::InitVulkan() {
 
     CreatePerFrameData();
     CreateCudaObjects();
+}
+
+void VulkanRenderer::InitCUDA() {
+    VkPhysicalDeviceIDProperties device_id_properties = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES,
+        .pNext = nullptr,
+    };
+    VkPhysicalDeviceProperties2 vk_device_properties = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+        .pNext = &device_id_properties,
+    };
+    vkGetPhysicalDeviceProperties2(m_context.physical_device, &vk_device_properties);
+
+    int cuda_device_count;
+    cudaGetDeviceCount(&cuda_device_count);
+
+    int cuda_device;
+    for (int device = 0; device < cuda_device_count; ++device) {
+        cudaDeviceProp device_properties;
+        cudaGetDeviceProperties(&device_properties, device);
+        if (!memcmp(&device_properties.uuid, device_id_properties.deviceUUID, VK_UUID_SIZE)) {
+            cuda_device = device;
+            std::cout << "Chosen CUDA device: " << device_properties.name << std::endl;
+            break;
+        }
+    }
+
+    cudaSetDevice(cuda_device);
 }
 
 void VulkanRenderer::InitImGui() {
@@ -858,6 +874,9 @@ void VulkanRenderer::InitVulkanInstance() {
         instance_create_info.pNext = &debug_messenger_create_info;
     }
 
+    std::cout << "CWD *before* vkCreateInstance: "
+          << std::filesystem::current_path() << '\n';
+
     VK_CHECK(vkCreateInstance(&instance_create_info, nullptr, &m_context.instance));
 
     volkLoadInstance(m_context.instance);
@@ -865,6 +884,9 @@ void VulkanRenderer::InitVulkanInstance() {
     if (m_props.enable_validation) {
         VK_CHECK(vkCreateDebugUtilsMessengerEXT(m_context.instance, &debug_messenger_create_info, nullptr, &m_context.debug_messenger));
     }
+
+    std::cout << "CWD *after*  vkCreateInstance: "
+          << std::filesystem::current_path() << '\n';
 
     //// Init Surface ////
     if (m_props.enable_present) {
@@ -978,6 +1000,14 @@ void VulkanRenderer::InitVulkanDevice() {
 
     // Choose graphics queue
     std::vector<VkDeviceQueueCreateInfo> queue_infos;
+
+    float queue_priority = 1.0f;
+    VkDeviceQueueCreateInfo queue_create_info {
+        .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+        .queueCount = 1,
+        .pQueuePriorities = &queue_priority
+    };
+
     {
         uint32_t queue_family_count = 0;
         vkGetPhysicalDeviceQueueFamilyProperties(m_context.physical_device, &queue_family_count, nullptr);
@@ -1000,14 +1030,8 @@ void VulkanRenderer::InitVulkanDevice() {
 
         PT_ASSERT(m_context.graphics_queue_family != std::numeric_limits<uint32_t>::max(), "Cannot find a queue with both present and graphics capability!");
 
-        float queue_priority = 1.0f;
-        VkDeviceQueueCreateInfo queue_create_info {
-            .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
-            .queueFamilyIndex = m_context.graphics_queue_family,
-            .queueCount = 1,
-            .pQueuePriorities = &queue_priority,
-        };
-        queue_infos.push_back(queue_create_info);
+        queue_create_info.queueFamilyIndex = m_context.graphics_queue_family;
+        queue_infos.emplace_back(queue_create_info);
     }
 
     // Handling Device Extensions
@@ -1176,10 +1200,11 @@ void VulkanRenderer::CreateSwapChain(const VkExtent2D &extent) {
         if (!m_props.enable_vsync) {
             for (const auto &mode : present_modes) {
                 if (mode == VK_PRESENT_MODE_MAILBOX_KHR)
-                    present_mode = VK_PRESENT_MODE_FIFO_KHR;
+                    present_mode = VK_PRESENT_MODE_MAILBOX_KHR;
             }
         }
     }
+    present_mode = VK_PRESENT_MODE_IMMEDIATE_KHR;
 
     // Choose extent
     m_context.swapchain_extent = surface_capabilities.currentExtent;

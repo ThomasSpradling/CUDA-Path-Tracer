@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.15)
+cmake_minimum_required(VERSION 3.24)
 project(cuda_path_tracer LANGUAGES CXX CUDA)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -51,7 +51,6 @@ target_include_directories(stb PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/st
 ## GLM
 set(GLM_BUILD_LIBRARY OFF CACHE BOOL "" FORCE)
 set(GLM_TEST_ENABLE OFF CACHE BOOL "" FORCE)
-set(GLM_ENABLE_CXX_20 ON CACHE BOOL "" FORCE)
 add_subdirectory(third_party/glm)
 
 ## Volk
@@ -82,12 +81,18 @@ target_link_libraries(imgui volk glfw)
 ## Vulkan Memory Allocator
 add_subdirectory(third_party/VulkanMemoryAllocator)
 
+## json
+set(JSON_BuildTests OFF CACHE BOOL "" FORCE)
+add_subdirectory(third_party/json)
+
 # Source
 
 file(GLOB_RECURSE CORE_SOURCES CONFIGURE_DEPENDS
     src/*.cpp src/*.cu src/*.h)
 
 add_executable(${CMAKE_PROJECT_NAME} ${CORE_SOURCES})
+
+target_compile_options(${PROJECT_NAME} PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>)
 
 set_target_properties(${CMAKE_PROJECT_NAME} PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
 if(CMAKE_VERSION VERSION_LESS "3.23.0")
@@ -109,6 +114,7 @@ target_link_libraries(${CMAKE_PROJECT_NAME}
     volk::volk
     VulkanMemoryAllocator
     imgui
+    nlohmann_json
 )
 
 target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE "$<$<AND:$<CONFIG:Debug,RelWithDebInfo>,$<COMPILE_LANGUAGE:CUDA>>:-G;-src-in-ptx>")

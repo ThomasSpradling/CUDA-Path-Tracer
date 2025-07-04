@@ -66,7 +66,6 @@ private:
         VkDevice device = VK_NULL_HANDLE;
         VkQueue graphics_queue = VK_NULL_HANDLE;
         uint32_t graphics_queue_family = std::numeric_limits<uint32_t>::max();
-        // VkDescriptorPool descriptor_pool = VK_NULL_HANDLE;
         
         VkSurfaceKHR surface = VK_NULL_HANDLE;
         VkSwapchainKHR swapchain = VK_NULL_HANDLE;
@@ -145,6 +144,7 @@ private:
 private:
     void InitGLFW();
     void InitVulkan();
+    void InitCUDA();
     void InitImGui();
 
     void ResizeSwapChain();
