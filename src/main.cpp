@@ -10,7 +10,7 @@ int main(int argc, char *argv[]) {
             .enable_present = true,
             .window_width = 800,
             .window_height = 800,   
-        }
+        },
     };
 
     if (argc < 2) {

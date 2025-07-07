@@ -1,5 +1,6 @@
 #include "scene.h"
 #include "exception.h"
+#include "material.h"
 #include <cstdint>
 #include <fstream>
 #include <iostream>
@@ -41,15 +42,38 @@ void Scene::LoadFromJSON(const std::string &filename) {
         Material material {};
         if (value["TYPE"] == "Diffuse") {
             const auto &color = value["RGB"];
-            material.color = glm::vec3(color[0], color[1], color[2]);
+            material.base_color = glm::vec3(color[0], color[1], color[2]);
+            material.type = Material::Type::Diffuse;
         } else if (value["TYPE"] == "Emitting") {
             const auto &color = value["RGB"];
-            material.color = glm::vec3(color[0], color[1], color[2]);
-            material.emittance = value["EMITTANCE"];
-        } else if (value["TYPE"] == "Specular") {
+            material.base_color = glm::vec3(color[0], color[1], color[2]);
+            material.type = Material::Type::Light;
+        } else if (value["TYPE"] == "Dielectric") {
             const auto &color = value["RGB"];
-            material.color = glm::vec3(color[0], color[1], color[2]);
+            material.base_color = glm::vec3(color[0], color[1], color[2]);
+            material.type = Material::Type::Dielectric;
+            material.ior = value["INDEX_OF_REFRACTION"];
+        } else if (value["TYPE"] == "Mirror") {
+            const auto &color = value["RGB"];
+            material.base_color = glm::vec3(color[0], color[1], color[2]);
+            material.type = Material::Type::Mirror;
         }
+        //  else if (value["TYPE"] == "Glass") {
+        //     const auto &color = value["RGB"];
+        //     material.base_color = glm::vec3(color[0], color[1], color[2]);
+        //     material.has_refractive = true;
+        //     material.index_of_refraction = value["INDEX_OF_REFRACTION"];
+
+
+        // } else if (value["TYPE"] == "Dielectric") {
+        //     const auto &color = value["RGB"];
+        //     material.color = glm::vec3(color[0], color[1], color[2]);
+        //     material.has_reflective = true;
+        //     material.has_refractive = true;
+        //     material.index_of_refraction = value["INDEX_OF_REFRACTION"];
+
+        //     std::cout << "DI: "<< material.index_of_refraction << std::endl;
+        // }
 
         material_ids[key] = m_materials.size();
         m_materials.emplace_back(material);

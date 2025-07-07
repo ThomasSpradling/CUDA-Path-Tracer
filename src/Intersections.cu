@@ -1,5 +1,6 @@
 #include "Intersections.h"
 #include "scene.h"
+#include "utils.h"
 
 __host__ __device__ float BoxIntersectionTest(
     const Geometry &box,
@@ -51,52 +52,46 @@ __host__ __device__ float BoxIntersectionTest(
     return -1;
 }
 
-__host__ __device__ float SphereIntersectionTest(
-    Geometry sphere,
-    Ray r,
-    glm::vec3 &intersectionPoint,
-    glm::vec3 &normal,
-    bool &outside)
+__host__ __device__
+float SphereIntersectionTest(
+    const Geometry& sphere,
+    const Ray& r,
+    glm::vec3& intersectionPoint,
+    glm::vec3& normal,
+    bool& outside)
 {
-    float radius = .5;
+    constexpr float radius = 0.5f;
+    constexpr float radius2 = radius * radius;
+    constexpr float kEpsilon = 1e-4f;
 
     glm::vec3 ro = glm::vec3(sphere.inv_transform * glm::vec4(r.origin, 1.0f));
-    glm::vec3 rd = glm::normalize(glm::vec3(sphere.inv_transform * glm::vec4(r.direction, 0.0f)));
+    glm::vec3 rd = glm::normalize(glm::vec3(
+        sphere.inv_transform * glm::vec4(r.direction, 0.0f)));
 
-    Ray rt;
-    rt.origin = ro;
-    rt.direction = rd;
-
-    float vDotDirection = glm::dot(rt.origin, rt.direction);
-    float radicand = vDotDirection * vDotDirection - (glm::dot(rt.origin, rt.origin) - powf(radius, 2));
-    if (radicand < 0) {
-        return -1;
+    float b = 2.0f * glm::dot(ro, rd);
+    float c = glm::dot(ro, ro) - radius2;
+    float disc = b * b - 4.0f * c;
+    if (disc < 0.0f) {
+        return -1.0f;
     }
 
-    float squareRoot = sqrtf(radicand);
-    float firstTerm = -vDotDirection;
-    float t1 = firstTerm + squareRoot;
-    float t2 = firstTerm - squareRoot;
+    float sqrtDisc = sqrtf(disc);
+    float t0 = (-b - sqrtDisc) * 0.5f;
+    float t1 = (-b + sqrtDisc) * 0.5f;
 
-    float t = 0;
-    if (t1 < 0 && t2 < 0) {
-        return -1;
-    }
-    else if (t1 > 0 && t2 > 0) {
-        t = glm::min(t1, t2);
-        outside = true;
-    } else {
-        t = glm::max(t1, t2);
-        outside = false;
+    outside = (glm::dot(ro, ro) > radius2);
+    float tObj = outside ? t0 : t1;
+    if (tObj < kEpsilon) {
+        return -1.0f;
     }
 
-    glm::vec3 objspaceIntersection = rt(t);
+    glm::vec3 pObj = ro + rd * tObj;
 
-    intersectionPoint = glm::vec3(sphere.transform * glm::vec4(objspaceIntersection, 1.f));
-    normal = glm::normalize(glm::vec3(sphere.inv_transpose * glm::vec4(objspaceIntersection, 0.f)));
-    if (!outside) {
-        normal = -normal;
-    }
+    intersectionPoint = glm::vec3(
+        sphere.transform * glm::vec4(pObj, 1.0f));
 
-    return glm::length(r.origin - intersectionPoint);
+    normal = glm::normalize(glm::vec3(
+        sphere.inv_transpose * glm::vec4(pObj, 0.0f)));
+
+    return glm::dot(intersectionPoint - r.origin, r.direction);
 }

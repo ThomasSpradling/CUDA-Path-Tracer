@@ -8,6 +8,7 @@
 #include <glm/gtc/matrix_inverse.hpp>
 
 #include <cuda_runtime.h>
+#include "material.h"
 
 enum class GeometryType {
     Sphere,
@@ -20,6 +21,14 @@ struct Ray {
 
     __host__ __device__ inline glm::vec3 operator()(float time) const {
         return origin + (time - .0001f) * glm::normalize(direction);
+    }
+
+    __host__ __device__ static Ray Make(const glm::vec3 &origin, const glm::vec3 &direction) {
+        return Ray{origin, direction};
+    }
+
+    __host__ __device__ static Ray MakeOffseted(const glm::vec3 &origin, const glm::vec3 &direction) {
+        return Ray{origin + direction * 1e-3f, direction};
     }
 };
 
@@ -36,18 +45,18 @@ struct Geometry {
     glm::mat4 inv_transpose { 1.0f };
 };
 
-struct Material {
-    glm::vec3 color;
-    struct {
-        float exponent;
-        glm::vec3 color;
-    } specular;
+// struct Material {
+//     glm::vec3 color;
+//     struct {
+//         float exponent;
+//         glm::vec3 color;
+//     } specular;
 
-    float has_reflective;
-    float has_refractive;
-    float index_of_refraction;
-    float emittance;
-};
+//     bool has_reflective = false;
+//     bool has_refractive = false;
+//     float index_of_refraction;
+//     float emittance;
+// };
 
 struct Camera {
     struct Default {
@@ -78,13 +87,17 @@ struct RenderState {
 
 struct PathSegment {
     Ray ray;
-    glm::vec3 color;
+    glm::vec3 throughput;
+    glm::vec3 color_accum;
     int pixel_index;
     int remaining_bounces;
+
+    bool hit = false;
 };
 
 struct ShadableIntersection {
     float t;
+    glm::vec3 pos;
     glm::vec3 normal;
     int material_id;
 };

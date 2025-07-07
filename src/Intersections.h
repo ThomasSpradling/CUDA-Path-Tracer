@@ -7,6 +7,8 @@
 #include <glm/gtx/intersect.hpp>
 #include "scene.h"
 
+#include <thrust/random.h>
+
 __host__ __device__ float BoxIntersectionTest(
     const Geometry &box,
     const Ray &r,
@@ -14,9 +16,10 @@ __host__ __device__ float BoxIntersectionTest(
     glm::vec3& normal,
     bool& outside);
 
-__host__ __device__ float SphereIntersectionTest(
-    Geometry sphere,
-    Ray r,
+__host__ __device__
+float SphereIntersectionTest(
+    const Geometry& sphere,
+    const Ray& r,
     glm::vec3& intersectionPoint,
     glm::vec3& normal,
     bool& outside);

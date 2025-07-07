@@ -47,8 +47,7 @@ void PathTracerApplication::Run() {
         }
 
         if (m_iteration == 0) {
-            m_path_tracer.Destroy();
-            m_path_tracer.Init();
+            m_path_tracer.Reset();
         }
 
         if (m_iteration < m_scene.State().iterations) {
