@@ -36,9 +36,6 @@ void Scene::LoadFromJSON(const std::string &filename) {
     fs::path scene_dir = scene_path.parent_path();
     std::ifstream file(scene_path);
 
-    std::cout << std::filesystem::current_path() << std::endl;
-    std::cout << "HELLO!!" << std::endl;
-
     PT_ASSERT(file.is_open(),
         std::format("ERROR: Could not open file '{}'.", filename));
 
@@ -100,6 +97,29 @@ void Scene::LoadFromJSON(const std::string &filename) {
             PT_ERROR("Invalid geometry type!");
         }
 
+        MeshSettings obj_settings;
+
+        if (parsed_object.contains("SETTINGS")) {
+            if (!parsed_object["SETTINGS"].is_array()) {
+                std::cerr << "Scene Warning: object contains SETTINGS but SETTINGS is not an array." << std::endl;
+            }
+
+            const auto &settings = parsed_object["SETTINGS"];
+            for (const auto &setting : settings) {
+                if (!setting.is_string()) {
+                    continue;
+                }
+
+                if (setting == "FLAT_SHADE") {
+                    if (geometry.type != GeometryType::GLTF_Primitive) {
+                        std::cerr << "Scene Warning: Setting 'FLAT_SHADE' is incompatible with object of type '" << type << "'" << std::endl;
+                    }
+
+                    obj_settings.flat_shade = true;
+                }
+            }
+        }
+
         geometry.material_id = material_ids[parsed_object["MATERIAL"]];
         const auto &trans = parsed_object["TRANS"];
         const auto &rotat = parsed_object["ROTAT"];
@@ -123,7 +143,7 @@ void Scene::LoadFromJSON(const std::string &filename) {
         if (geometry.type != GeometryType::GLTF_Primitive) {
             m_geometry.push_back(geometry);
         } else {
-            GLTF::GLTFModel model;
+            GLTF::GLTFModel model(obj_settings);
             const std::string &file = parsed_object["PATH"];
             if (file.empty()) {
                 PT_ERROR("Missing PATH for gLTF object type!");

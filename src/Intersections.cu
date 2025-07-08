@@ -107,7 +107,7 @@ float TriangleIntersectionTest(
     const glm::vec3 &v2,
     glm::vec2 &uv)
 {
-    const float EPSILON = 1e-6f;
+    const float EPSILON = 1e-8f;
     glm::vec3 edge1 = v1 - v0;
     glm::vec3 edge2 = v2 - v0;
     glm::vec3 p = glm::cross(ray.direction, edge2);
@@ -135,7 +135,7 @@ float TriangleIntersectionTest(
 }
 
 __host__ __device__
-float NaivePrimitiveIntersesection(
+float NaivePrimitiveIntersection(
     const Geometry & geom,
     const MeshVertex *vertices,
     const uint32_t *indices,
@@ -148,7 +148,7 @@ float NaivePrimitiveIntersesection(
     ray.origin = glm::vec3(geom.inv_transform * glm::vec4(r.origin, 1.0f));
     ray.direction = glm::normalize(glm::vec3(geom.inv_transform * glm::vec4(r.direction, 0.0f)));
 
-    float best_t = -1.0f;
+    float best_t = 1e31f;
     glm::vec3 best_normal(0.0f);
     bool best_outside = true;
 
@@ -168,30 +168,40 @@ float NaivePrimitiveIntersesection(
         if (t_obj < 0.0f)
             continue;
 
-        if (t_obj > 0.0f && (best_t < 0.0f || t_obj < best_t)) {
-            best_t = t_obj;
-            best_normal = glm::normalize(glm::cross(
-                v1.position - v0.position,
-                v2.position - v0.position));
+        glm::vec3 p_obj = ray(t_obj);
+        glm::vec3 p_world = glm::vec3(geom.transform * glm::vec4(p_obj, 1.f));
+        float t_world = glm::dot(p_world - r.origin, r.direction);
+
+        if (t_world < best_t) {
+            best_t = t_world;
+
+            glm::vec3 n0 = v0.normal, n1 = v1.normal, n2 = v2.normal;
+            bool has_normals = (glm::length2(n0) > 1e-6f) && (glm::length2(n1) > 1e-6f) && (glm::length2(n2) > 1e-6f);
+
+            if (has_normals) {
+                float w = 1.0f - uv.x - uv.y;
+                best_normal = glm::normalize(w * n0 + uv.x * n1 + uv.y * n2);
+            } else {
+                best_normal = glm::normalize(glm::cross(
+                    v1.position - v0.position,
+                    v2.position - v0.position));
+            }
             best_outside = (glm::dot(ray.direction, best_normal) < 0.0f);
         }
     }
 
     // no hit
-    if (best_t < 0.0f)
+    if (fabsf(best_t) < 1e-5)
         return -1.0f;
 
-    glm::vec3 position = ray(best_t);
-
     // transform to world space
-    intersection_point = glm::vec3(geom.transform * glm::vec4(position, 1.0f));
-    glm::vec3 normal_world = glm::normalize(glm::vec3(geom.inv_transpose * glm::vec4(normal, 0.0f)));
+    intersection_point = r(best_t);
+    glm::vec3 normal_world = glm::normalize(glm::vec3(geom.inv_transpose * glm::vec4(best_normal, 0.0f)));
 
-    outside = (glm::dot(normal_world, r.direction) < 0.0f);
+    outside = best_outside;
     normal = outside ? normal_world : -normal_world;
 
-    float result = glm::length(intersection_point - r.origin);
-    return result;
+    return best_t;
 }
 
 #if USE_BVH
@@ -260,26 +270,29 @@ __device__ float IntersectBVH(
     const uint32_t *tri_indices,
     const MeshVertex *vertices,
     const uint32_t *indices,
-    const Ray &ray_world,
-    glm::vec3 &hit_p,
-    glm::vec3 &hit_n,
-    bool &outside) {
+    const Ray &r,
+    glm::vec3 &intersection_point,
+    glm::vec3 &normal,
+    bool &outside)
+{
     Ray ray;
-    ray.origin    = glm::vec3(geom.inv_transform * glm::vec4(ray_world.origin,    1.0f));
-    ray.direction = glm::vec3(geom.inv_transform * glm::vec4(ray_world.direction, 0.0f));
+    ray.origin = glm::vec3(geom.inv_transform * glm::vec4(r.origin, 1.0f));
+    ray.direction = glm::normalize(glm::vec3(geom.inv_transform * glm::vec4(r.direction, 0.0f)));
 
     StackEntry stack[64];
     uint32_t top = 0u;
     Push(stack, top, geom.first_bvh_node, 0.0f);
 
-    float best_object_t = FLT_MAX;
-    float best_world_t  = -1.0f;
+    float best_t_obj = 1e31f;
+    float best_t_world = 1e31f;
+    glm::vec3 best_normal {};
+    bool best_outside = true;
 
     while (top > 0u) {
         StackEntry current_entry = stack[--top];
         const BVH::BVHNode &node_data = nodes[current_entry.node];
 
-        if (current_entry.t_near >= best_object_t) {
+        if (current_entry.t_near >= best_t_obj) {
             continue;
         }
 
@@ -290,39 +303,40 @@ __device__ float IntersectBVH(
                                                           + tri_iter];
                 uint32_t base_index = geom.mesh.first_index + local_tri_idx * 3u;
 
-                uint32_t index0 = indices[base_index + 0u];
-                uint32_t index1 = indices[base_index + 1u];
-                uint32_t index2 = indices[base_index + 2u];
+                uint32_t vi0 = indices[base_index + 0];
+                uint32_t vi1 = indices[base_index + 1];
+                uint32_t vi2 = indices[base_index + 2];
 
-                glm::vec3 p0 = vertices[index0].position;
-                glm::vec3 p1 = vertices[index1].position;
-                glm::vec3 p2 = vertices[index2].position;
+                const MeshVertex &v0 = vertices[vi0];
+                const MeshVertex &v1 = vertices[vi1];
+                const MeshVertex &v2 = vertices[vi2];
 
                 glm::vec2 uv;
-                float object_t = TriangleIntersectionTest(ray, p0, p1, p2, uv);
-                if (object_t < 0.0f || object_t >= best_object_t) {
+                float t_obj = TriangleIntersectionTest(ray, v0.position, v1.position, v2.position, uv);
+                if (t_obj < 0.0f) {
                     continue;
                 }
 
-                best_object_t = object_t;
+                glm::vec3 p_obj = ray(t_obj);
+                glm::vec3 p_world = glm::vec3(geom.transform * glm::vec4(p_obj, 1.f));
+                float t_world = glm::dot(p_world - r.origin, r.direction);
 
-                glm::vec3 p_obj = ray.origin + object_t * ray.direction;
-                hit_p = glm::vec3(geom.transform * glm::vec4(p_obj, 1.0f));
-                best_world_t = glm::dot(hit_p - ray_world.origin, ray_world.direction);
+                if (t_world < best_t_world || best_t_world < 0.0f) {
+                    best_t_world = t_world;
+                    best_t_obj = t_obj;
+                    
+                    float w = 1.0f - uv.x - uv.y;
+                    glm::vec3 n0 = v0.normal, n1 = v1.normal, n2 = v2.normal;
+                    bool has_normals = (glm::length2(n0) > 1e-6f) && (glm::length2(n1) > 1e-6f) && (glm::length2(n2) > 1e-6f);
 
-                float w = 1.0f - uv.x - uv.y;
-                glm::vec3 n_obj = w * vertices[index0].normal
-                                + uv.x * vertices[index1].normal
-                                + uv.y * vertices[index2].normal;
-                if (glm::length2(n_obj) < 1e-6f) {
-                    n_obj = glm::cross(p1 - p0, p2 - p0);
-                }
-
-                hit_n = glm::normalize(glm::vec3(
-                            geom.inv_transpose * glm::vec4(n_obj, 0.0f)));
-                outside = (glm::dot(hit_n, ray_world.direction) < 0.0f);
-                if (!outside) {
-                    hit_n = -hit_n;
+                    if (has_normals) {
+                        best_normal = glm::normalize(w * n0 + uv.x * n1 + uv.y * n2);
+                    } else {
+                        best_normal = glm::normalize(glm::cross(
+                            v1.position - v0.position,
+                            v2.position - v0.position));
+                    }
+                    best_outside = (glm::dot(ray.direction, best_normal) < 0.0f);
                 }
             }
         } else {
@@ -331,7 +345,7 @@ __device__ float IntersectBVH(
 
             float t_near_left  = 0.0f;
             float t_near_right = 0.0f;
-            float t_limit      = best_object_t;
+            float t_limit = best_t_obj;
 
             bool hit_left  = IntersectAABB(ray, nodes[left_index].bounds,  t_limit, t_near_left);
             bool hit_right = IntersectAABB(ray, nodes[right_index].bounds, t_limit, t_near_right);
@@ -352,7 +366,17 @@ __device__ float IntersectBVH(
         }
     }
 
-    return best_world_t;
+    if (best_t_world < 1e-5)
+        return -1.0f;
+
+    // transform to world space
+    intersection_point = r(best_t_world);
+    glm::vec3 normal_world = glm::normalize(glm::vec3(geom.inv_transpose * glm::vec4(best_normal, 0.0f)));
+
+    outside = best_outside;
+    normal = outside ? normal_world : -normal_world;
+
+    return best_t_world;
 }
 
 #endif

@@ -101,7 +101,7 @@ __global__ void ComputeIntersections(
 #if USE_BVH
             t = IntersectBVH(geom, bvh_nodes, tri_indices, vertices, indices, path_segment.ray, tmp_intersect, tmp_normal, outside);
 #else
-            t = PrimitiveIntersectionTest(geom, vertices, indices, path_segment.ray, tmp_intersect, tmp_normal, outside);
+            t = NaivePrimitiveIntersection(geom, vertices, indices, path_segment.ray, tmp_intersect, tmp_normal, outside);
 #endif
         }
 

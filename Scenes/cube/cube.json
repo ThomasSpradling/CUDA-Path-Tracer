@@ -95,7 +95,10 @@
       "MATERIAL":"glass",
       "TRANS":[2.0,2.0,1.0],
       "ROTAT":[0.0,0.0,30.0],
-      "SCALE":[0.3,0.3,0.3]
+      "SCALE":[0.3,0.3,0.3],
+      "SETTINGS": [
+        "FLAT_SHADE"
+      ]
     },
     {
       "TYPE":"gltf",
@@ -103,7 +106,10 @@
       "MATERIAL":"specular",
       "TRANS":[-3.0,2.0,-1.0],
       "ROTAT":[0.0,0.0,0.0],
-      "SCALE":[0.5,0.5,0.5]
+      "SCALE":[0.5,0.5,0.5],
+      "SETTINGS": [
+        "FLAT_SHADE"
+      ]
     },
     {
       "TYPE":"gltf",
@@ -111,7 +117,10 @@
       "MATERIAL":"diffuse_white",
       "TRANS":[-2.0,6.0,-1.0],
       "ROTAT":[0.0,60.0,0.0],
-      "SCALE":[0.3, 0.3, 0.3]
+      "SCALE":[0.3, 0.3, 0.3],
+      "SETTINGS": [
+        "FLAT_SHADE"
+      ]
     }
   ]
 }

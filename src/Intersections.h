@@ -52,7 +52,7 @@ __device__ float IntersectBVH(
     const MeshVertex *vertex_array,
     const uint32_t *index_array,
     const Ray &r,
-    glm::vec3 &hit_p,
+    glm::vec3 &intersection_point,
     glm::vec3 &hit_n,
     bool &outside);
 

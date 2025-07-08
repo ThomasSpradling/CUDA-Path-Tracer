@@ -17,7 +17,7 @@ struct Ray {
     glm::vec3 direction;
 
     __host__ __device__ inline glm::vec3 operator()(float time) const {
-        return origin + (time - .0001f) * glm::normalize(direction);
+        return origin + (time - 1e-6f) * glm::normalize(direction);
     }
 
     __host__ __device__ static Ray Make(const glm::vec3 &origin, const glm::vec3 &direction) {

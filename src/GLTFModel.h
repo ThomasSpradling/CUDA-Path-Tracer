@@ -45,12 +45,18 @@
 #define TINYGLTF_NO_STB_IMAGE_WRITE
 #include <tiny_gltf.h>
 
+struct MeshSettings {
+    bool flat_shade = false;
+};
+
 struct MeshVertex {
     glm::vec3 position;
     glm::vec3 normal;
     glm::vec2 uv0;
     glm::vec4 color;
 };
+
+struct ObjectSettings;
 
 namespace GLTF {
 
@@ -98,7 +104,7 @@ namespace GLTF {
 
     class GLTFModel {
     public:
-        GLTFModel() {};
+        GLTFModel(const MeshSettings &settings) : m_settings(settings) {};
         ~GLTFModel() = default;
 
         void LoadGLTF(const std::string &filename);
@@ -112,6 +118,8 @@ namespace GLTF {
         // std::vector<std::shared_ptr<SceneNode>> m_nodes;
         std::vector<std::shared_ptr<SceneNode>> m_root_nodes;
         // std::vector<std::shared_ptr<Mesh>> m_meshes;
+
+        const MeshSettings &m_settings;
 
         std::vector<uint32_t> m_indices;
         std::vector<MeshVertex> m_vertices;

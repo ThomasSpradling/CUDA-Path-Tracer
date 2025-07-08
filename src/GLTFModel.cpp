@@ -104,7 +104,7 @@ namespace GLTF {
 
                 //// Normals ////
                 std::vector<glm::vec3> normals(vertex_count, glm::vec3(0.0f));
-                if (primitive.attributes.contains("NORMAL")) {
+                if (!m_settings.flat_shade && primitive.attributes.contains("NORMAL")) {
                     const tinygltf::Accessor &normal_accessor = model.accessors[primitive.attributes.at("NORMAL")];
                     IterateAccessor<glm::vec3>(model, normal_accessor, [&](uint32_t i, const glm::vec3 &value) {
                         normals[i] = value;
