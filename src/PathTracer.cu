@@ -7,6 +7,7 @@
 #include "MathUtils.h"
 #include "PathTracer.h"
 #include "material.h"
+#include "utils.h"
 
 
 #define GLM_ENABLE_EXPERIMENTAL 

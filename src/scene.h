@@ -30,8 +30,37 @@ struct Ray {
 };
 
 struct AABB {
-    glm::vec3 min;
-    glm::vec3 max;
+    glm::vec3 min{FLT_MAX};
+    glm::vec3 max{-FLT_MAX};
+
+    __host__ __device__ inline void AddPoint(const glm::vec3 &point) {
+        min = glm::min(min, point);
+        max = glm::max(max, point);
+    }
+    __host__ __device__ inline void Union(const AABB &other) {
+        min = glm::min(min, other.min);
+        max = glm::max(max, other.max);
+    }
+
+    __host__ __device__ inline bool IsEmpty() const {
+        return (min.x > max.x) || (min.y > max.y) || (min.z > max.z);
+    }
+
+    __host__ __device__ inline glm::vec3 Extent() const {
+        return max - min;
+    }
+
+    __host__ __device__ inline float SurfaceArea() const {
+        glm::vec3 d = max - min;
+        d = glm::max(d, glm::vec3(0.0f));
+        return 2.0f * (d.x * d.y + d.y * d.z + d.z * d.x);
+    }
+
+    __host__ __device__ inline float Volume() const {
+        glm::vec3 d = max - min;
+        d = glm::max(d, glm::vec3(0.0f));
+        return d.x * d.y * d.z;
+    }
 };
 
 enum class GeometryType {

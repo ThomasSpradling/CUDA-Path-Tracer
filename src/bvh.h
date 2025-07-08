@@ -10,10 +10,9 @@
 // Given geometry, verts, and indices, create bounding volume hierarchy
 
 namespace BVH {
-    struct Triangle {
-        MeshVertex v0;
-        MeshVertex v1;
-        MeshVertex v2;
+    struct Bin {
+        AABB bounds;
+        uint32_t tri_count;
     };
 
     struct BVHNode {
@@ -38,6 +37,7 @@ namespace BVH {
         std::vector<uint32_t> m_tri_indices;
 
         std::vector<glm::vec3> m_centroids;
+        std::vector<AABB> m_aabbs;
 
         const Geometry &m_geometry;
         const std::vector<MeshVertex> &m_vertices;
@@ -46,6 +46,9 @@ namespace BVH {
         void UpdateNodeAABB(uint32_t node);
         void Subdivide(uint32_t node);
         void ForEachTri(std::function<void(uint32_t, const MeshVertex &, const MeshVertex &, const MeshVertex &)> callback);
+    
+        float ComputeSplitPlane(BVHNode &node, uint32_t &best_axis, float &best_pos);
+        float EvaluateSAH(BVHNode &node, uint32_t axis, float pos);
     };
 
 }

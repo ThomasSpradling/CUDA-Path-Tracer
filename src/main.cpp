@@ -8,8 +8,8 @@ int main(int argc, char *argv[]) {
             .vulkan_version = VK_MAKE_API_VERSION(0, 1, 3, 0),
             .enable_validation = false,
             .enable_present = true,
-            .window_width = 1200,
-            .window_height = 1200,   
+            .window_width = 800,
+            .window_height = 800,   
         },
     };
 
