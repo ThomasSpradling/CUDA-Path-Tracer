@@ -54,7 +54,6 @@ __global__ void GenerateRayFromCamera(Camera cam, int iteration, int trace_depth
         segment.hit = true;
     }
 }
-
 __global__ void ComputeIntersections(
     int depth,
     int num_paths,
@@ -63,6 +62,12 @@ __global__ void ComputeIntersections(
     int geoms_size,
 #if SORT_BY_MATERIAL
     int *sort_keys,
+#endif
+    MeshVertex *vertices,
+    uint32_t *indices,
+#if USE_BVH
+    BVH::BVHNode *bvh_nodes,
+    uint32_t *tri_indices,
 #endif
     ShadableIntersection *intersections
 ) {
@@ -92,6 +97,12 @@ __global__ void ComputeIntersections(
             t = BoxIntersectionTest(geom, path_segment.ray, tmp_intersect, tmp_normal, outside);
         } else if (geom.type == GeometryType::Sphere) {
             t = SphereIntersectionTest(geom, path_segment.ray, tmp_intersect, tmp_normal, outside);
+        } else if (geom.type == GeometryType::GLTF_Primitive) {
+#if USE_BVH
+            t = IntersectBVH(geom, bvh_nodes, tri_indices, vertices, indices, path_segment.ray, tmp_intersect, tmp_normal, outside);
+#else
+            t = PrimitiveIntersectionTest(geom, vertices, indices, path_segment.ray, tmp_intersect, tmp_normal, outside);
+#endif
         }
 
         if (t > 0.0f && t_min > t) {
@@ -248,9 +259,6 @@ void PathTracer::Init() {
     CUDA_CHECK(cudaMalloc(&md_terminated, pixel_count * sizeof(PathSegment)));
     m_terminated_thrust = thrust::device_ptr<PathSegment>(md_terminated);
 
-    CUDA_CHECK(cudaMalloc(&md_geometries, m_scene.Geometries().size() * sizeof(Geometry)));
-    CUDA_CHECK(cudaMemcpy(md_geometries, m_scene.Geometries().data(), m_scene.Geometries().size() * sizeof(Geometry), cudaMemcpyHostToDevice));
-
     CUDA_CHECK(cudaMalloc(&md_materials, m_scene.Materials().size() * sizeof(Material)));
     CUDA_CHECK(cudaMemcpy(md_materials, m_scene.Materials().data(), m_scene.Materials().size() * sizeof(Material), cudaMemcpyHostToDevice));
 
@@ -258,10 +266,57 @@ void PathTracer::Init() {
     CUDA_CHECK(cudaMemset(md_intersections, 0, pixel_count * sizeof(ShadableIntersection)));
     m_intersection_thrust = thrust::device_ptr<ShadableIntersection>(md_intersections);
 
+    CUDA_CHECK(cudaMalloc(&md_vertices, m_scene.VertexCount() * sizeof(MeshVertex)));
+    CUDA_CHECK(cudaMemcpy(md_vertices, m_scene.Vertices().data(), m_scene.VertexCount() * sizeof(MeshVertex), cudaMemcpyHostToDevice));
+
+    CUDA_CHECK(cudaMalloc(&md_indices, m_scene.IndexCount() * sizeof(uint32_t)));
+    CUDA_CHECK(cudaMemcpy(md_indices, m_scene.Indices().data(), m_scene.IndexCount() * sizeof(uint32_t), cudaMemcpyHostToDevice));
+
 #if SORT_BY_MATERIAL
     CUDA_CHECK(cudaMalloc(&md_keys, pixel_count * sizeof(uint32_t)));
     m_keys_thrust = thrust::device_ptr<int>(md_keys);
 #endif
+
+#if USE_BVH
+    int geometry_count = m_scene.Geometries().size();
+    for (int i = 0; i < geometry_count; ++i) {
+        auto &geom = m_scene.Geometries()[i];
+        if (geom.type != GeometryType::GLTF_Primitive)
+            continue;
+        
+        BVH::BVH bvh(geom, m_scene.Vertices(), m_scene.Indices());
+        bvh.Build();
+
+        const uint32_t base_node = static_cast<uint32_t>(m_bvh_nodes.size());
+        const uint32_t base_tri = static_cast<uint32_t>(m_bvh_tri_indices.size());
+
+        for (const BVH::BVHNode &src : bvh.Nodes()) {
+            BVH::BVHNode n = src;
+
+            if (n.left_child != UINT32_MAX)
+                n.left_child += base_node;
+
+            m_bvh_nodes.push_back(n);
+        }
+
+        m_bvh_tri_indices.insert(m_bvh_tri_indices.end(), bvh.TriIndices().begin(), bvh.TriIndices().end());
+
+        geom.first_bvh_node = base_node;
+        geom.bvh_node_count = bvh.Nodes().size();
+
+        geom.first_tri_index = base_tri;
+        geom.tri_index_count = bvh.TriIndices().size();
+    }
+
+    CUDA_CHECK(cudaMalloc(&md_bvh_nodes, m_bvh_nodes.size() * sizeof(BVH::BVHNode)));
+    CUDA_CHECK(cudaMemcpy(md_bvh_nodes, m_bvh_nodes.data(), m_bvh_nodes.size() * sizeof(BVH::BVHNode), cudaMemcpyHostToDevice));
+    
+    CUDA_CHECK(cudaMalloc(&md_bvh_tri_indices, m_bvh_tri_indices.size() * sizeof(uint32_t)));
+    CUDA_CHECK(cudaMemcpy(md_bvh_tri_indices, m_bvh_tri_indices.data(), m_bvh_tri_indices.size() * sizeof(uint32_t), cudaMemcpyHostToDevice));
+#endif
+
+    CUDA_CHECK(cudaMalloc(&md_geometries, m_scene.Geometries().size() * sizeof(Geometry)));
+    CUDA_CHECK(cudaMemcpy(md_geometries, m_scene.Geometries().data(), m_scene.Geometries().size() * sizeof(Geometry), cudaMemcpyHostToDevice));
 }
 
 void PathTracer::Destroy() {
@@ -326,6 +381,12 @@ void PathTracer::PathTrace(uchar4* data, int frame, int iteration) {
             md_geometries, m_scene.Geometries().size(),
 #if SORT_BY_MATERIAL
             md_keys,
+#endif
+            md_vertices,
+            md_indices,
+#if USE_BVH
+            md_bvh_nodes,
+            md_bvh_tri_indices,
 #endif
             md_intersections);
         cudaDeviceSynchronize();

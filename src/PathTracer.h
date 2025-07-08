@@ -1,10 +1,14 @@
 #pragma once
 
+#include "bvh.h"
+#include "settings.h"
 #include "settings.h"
 #include "scene.h"
 #include <thrust/device_ptr.h>
+#include <vector>
 #include <vector_types.h>
 #include <volk.h>
+#include "GLTFModel.h"
 
 struct PathTracerProperties;
 
@@ -40,4 +44,17 @@ private:
 
     ShadableIntersection *md_intersections = nullptr;
     thrust::device_ptr<ShadableIntersection> m_intersection_thrust;
+
+    MeshVertex *md_vertices;
+    uint32_t *md_indices;
+
+#if USE_BVH
+    std::vector<BVH::BVHNode> m_bvh_nodes;
+    BVH::BVHNode *md_bvh_nodes;
+
+    std::vector<uint32_t> m_bvh_tri_indices;
+    uint32_t *md_bvh_tri_indices;
+#endif
+private:
+
 };

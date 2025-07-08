@@ -1,5 +1,6 @@
 #include "scene.h"
 #include "exception.h"
+#include "glm/gtc/matrix_inverse.hpp"
 #include "material.h"
 #include <cstdint>
 #include <fstream>
@@ -24,14 +25,20 @@ using json = nlohmann::json;
 
 Scene::Scene(const std::string &filename) {
     std::cout << "Reading scene from " << filename << std::endl;
-    std::string ext = filename.substr(filename.find_last_of('.'));
+    std::string ext = fs::path(filename).extension().string();
     PT_ASSERT(ext == ".json", std::format("Couldn't read from file '{}'.", filename));
 
     LoadFromJSON(filename);
 }
 
 void Scene::LoadFromJSON(const std::string &filename) {
-    std::ifstream file(filename);
+    fs::path scene_path = filename;
+    fs::path scene_dir = scene_path.parent_path();
+    std::ifstream file(scene_path);
+
+    std::cout << std::filesystem::current_path() << std::endl;
+    std::cout << "HELLO!!" << std::endl;
+
     PT_ASSERT(file.is_open(),
         std::format("ERROR: Could not open file '{}'.", filename));
 
@@ -87,6 +94,8 @@ void Scene::LoadFromJSON(const std::string &filename) {
             geometry.type = GeometryType::Cube;
         } else if (type == "sphere") {
             geometry.type = GeometryType::Sphere;
+        } else if (type == "gltf") {
+            geometry.type = GeometryType::GLTF_Primitive;
         } else {
             PT_ERROR("Invalid geometry type!");
         }
@@ -111,7 +120,54 @@ void Scene::LoadFromJSON(const std::string &filename) {
         geometry.inv_transform = glm::inverse(geometry.transform);
         geometry.inv_transpose = glm::inverseTranspose(geometry.transform);
 
-        m_geometry.push_back(geometry);
+        if (geometry.type != GeometryType::GLTF_Primitive) {
+            m_geometry.push_back(geometry);
+        } else {
+            GLTF::GLTFModel model;
+            const std::string &file = parsed_object["PATH"];
+            if (file.empty()) {
+                PT_ERROR("Missing PATH for gLTF object type!");
+            }
+
+            fs::path model_path = file;
+            if (model_path.is_relative()) {
+                model_path = scene_dir / model_path;
+            }
+            if (!fs::exists(model_path))
+                PT_ERROR("gLTF file not found: " + model_path.string());
+
+            model.LoadGLTF(model_path.string());
+
+            uint32_t base_vertex = static_cast<uint32_t>(m_vertices.size());
+            uint32_t base_index = static_cast<uint32_t>(m_indices.size());
+            m_vertices.insert(m_vertices.end(), model.Vertices().begin(), model.Vertices().end());
+            for (auto idx : model.Indices())
+                m_indices.push_back(idx + base_vertex);
+
+            model.ForEachNode([&](GLTF::SceneNode &node) {
+                if (!node.mesh)
+                    return;
+
+                glm::mat4 node_transform = geometry.transform * node.LocalMatrix();
+                for (auto &primitive : node.mesh->primitives) {
+                    Geometry geom_copy = geometry;
+                    TriangleMesh tri_mesh {
+                        .first_index = base_index + primitive.first_index,
+                        .index_count = primitive.index_count,
+                        .first_vertex = base_vertex,
+                        .vertex_count = primitive.vertex_count,
+                    };
+                    geom_copy.transform = node_transform;
+                    geom_copy.inv_transform = glm::inverse(node_transform);
+                    geom_copy.inv_transpose = glm::inverseTranspose(node_transform);
+                    geom_copy.mesh = tri_mesh;
+                    m_geometry.push_back(geom_copy);
+                    // std::cout << "ADDED geometry prim" << std::endl;
+                }
+            });
+
+            
+        }
     }
 
     const auto &camera_data = data["Camera"];

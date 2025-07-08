@@ -874,9 +874,6 @@ void VulkanRenderer::InitVulkanInstance() {
         instance_create_info.pNext = &debug_messenger_create_info;
     }
 
-    std::cout << "CWD *before* vkCreateInstance: "
-          << std::filesystem::current_path() << '\n';
-
     VK_CHECK(vkCreateInstance(&instance_create_info, nullptr, &m_context.instance));
 
     volkLoadInstance(m_context.instance);
@@ -884,9 +881,6 @@ void VulkanRenderer::InitVulkanInstance() {
     if (m_props.enable_validation) {
         VK_CHECK(vkCreateDebugUtilsMessengerEXT(m_context.instance, &debug_messenger_create_info, nullptr, &m_context.debug_messenger));
     }
-
-    std::cout << "CWD *after*  vkCreateInstance: "
-          << std::filesystem::current_path() << '\n';
 
     //// Init Surface ////
     if (m_props.enable_present) {

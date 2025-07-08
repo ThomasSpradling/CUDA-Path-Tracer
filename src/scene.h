@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <vector>
 #include "Image.h"
@@ -8,12 +9,8 @@
 #include <glm/gtc/matrix_inverse.hpp>
 
 #include <cuda_runtime.h>
+#include "GLTFModel.h"
 #include "material.h"
-
-enum class GeometryType {
-    Sphere,
-    Cube,
-};
 
 struct Ray {
     glm::vec3 origin;
@@ -32,6 +29,24 @@ struct Ray {
     }
 };
 
+struct AABB {
+    glm::vec3 min;
+    glm::vec3 max;
+};
+
+enum class GeometryType {
+    Sphere,
+    Cube,
+    GLTF_Primitive,
+};
+
+struct TriangleMesh {
+    uint32_t first_index;
+    uint32_t index_count;
+    uint32_t first_vertex;
+    uint32_t vertex_count;
+};
+
 struct Geometry {
     enum GeometryType type;
     int material_id;
@@ -43,6 +58,14 @@ struct Geometry {
     glm::mat4 transform { 1.0f };
     glm::mat4 inv_transform { 1.0f };
     glm::mat4 inv_transpose { 1.0f };
+
+    TriangleMesh mesh;
+
+    int first_bvh_node = -1;
+    int bvh_node_count = -1;
+
+    int first_tri_index = -1;
+    int tri_index_count = -1;
 };
 
 // struct Material {
@@ -115,10 +138,20 @@ public:
 
     std::vector<Material> &Materials() { return m_materials; }
     const std::vector<Material> &Materials() const { return m_materials; }
+
+    int VertexCount() const { return m_vertices.size(); }
+    const std::vector<MeshVertex> &Vertices() const { return m_vertices; }
+    
+    int IndexCount() const { return m_indices.size(); }
+    const std::vector<uint32_t> &Indices() const { return m_indices; }
 private:
     std::vector<Geometry> m_geometry;
     std::vector<Material> m_materials;
     RenderState m_state;
+
+    std::vector<TriangleMesh> m_mesh_buffer;
+    std::vector<MeshVertex> m_vertices;
+    std::vector<uint32_t> m_indices;
 private:
     void LoadFromJSON(const std::string &filename);
 };

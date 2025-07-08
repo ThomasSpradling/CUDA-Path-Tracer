@@ -29,17 +29,11 @@ set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
 add_subdirectory(third_party/glfw)
 
-## XML
-option(PUGIXML_INSTALL OFF)
-add_subdirectory(third_party/pugixml)
-
-## TinyObj
-add_library(tinyobjloader third_party/tinyobjloader/tiny_obj_loader.cpp)
-target_include_directories(tinyobjloader PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/tinyobjloader)
-
-## TinyPly
-add_library(tinyply STATIC third_party/tinyply/tinyply.cpp)
-target_include_directories(tinyply PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/tinyply)
+## TinyGLTF
+set(TINYGLTF_BUILD_LOADER_EXAMPLE OFF CACHE BOOL "" FORCE)
+set(TINYGLTF_INSTALL_VENDOR OFF CACHE BOOL "" FORCE)
+set(TINYGLTF_INSTALL OFF CACHE BOOL "" FORCE)
+add_subdirectory(third_party/tinygltf)
 
 ## STB
 add_library(stb
@@ -108,9 +102,8 @@ target_link_libraries(${CMAKE_PROJECT_NAME}
     CUDA::cuda_driver
     stb
     glfw
+    tinygltf
     glm::glm
-    tinyply
-    tinyobjloader
     volk::volk
     VulkanMemoryAllocator
     imgui
@@ -119,7 +112,6 @@ target_link_libraries(${CMAKE_PROJECT_NAME}
 
 target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE "$<$<AND:$<CONFIG:Debug,RelWithDebInfo>,$<COMPILE_LANGUAGE:CUDA>>:-G;-src-in-ptx>")
 target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE "$<$<AND:$<CONFIG:Release>,$<COMPILE_LANGUAGE:CUDA>>:-lineinfo;-src-in-ptx>")
-
 
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT ${CMAKE_PROJECT_NAME})
 
