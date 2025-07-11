@@ -9,51 +9,15 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
 
+#include "geometry.h"
+
 #include "utils.h"
-
-// Set of primitives:
-    // glTF material id
-    // first_index
-    // index_count
-    // vertex_count
-    // All loaded in GLTF Model buffer
-// Take larger buffer to all primitive structs
-// Large vertex buffer + large index buffer
-
-// When adding mesh:
-// big vertex buffer
-// big index buffer
-//
-// primitives list
-//
-// for all models:
-//      for all primitives:
-//           add primitive to primitive list, modify first_index = prim.first_index + curr
-//      add entire indice and vertices to buffers
-// Add ALL mesh geometry to buffers
-// cudaMalloc()
-// cudaMemcpyHost2Device()
-//
-// cudaMalloc()
-// cudaMemcpyHost2Device()
-//
-// To render (basic level):
-//      For each primitive:
-//          for each [i0, i1, i2] at primitive pos in index buffer:
-//            test triangle intersection
 
 #define TINYGLTF_NO_STB_IMAGE_WRITE
 #include <tiny_gltf.h>
 
 struct MeshSettings {
     bool flat_shade = false;
-};
-
-struct MeshVertex {
-    glm::vec3 position;
-    glm::vec3 normal;
-    glm::vec2 uv0;
-    glm::vec4 color;
 };
 
 struct ObjectSettings;

@@ -4,7 +4,7 @@
 #include "settings.h"
 #include <functional>
 #if USE_BVH
-#include "scene.h"
+#include "geometry.h"
 #include <glm/glm.hpp>
 #include <vector>
 // Given geometry, verts, and indices, create bounding volume hierarchy

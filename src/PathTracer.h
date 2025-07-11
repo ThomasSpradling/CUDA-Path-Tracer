@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Intersections.h"
 #include "bvh.h"
 #include "settings.h"
 #include "settings.h"
@@ -42,8 +43,8 @@ private:
     thrust::device_ptr<int> m_keys_thrust;
 #endif
 
-    ShadableIntersection *md_intersections = nullptr;
-    thrust::device_ptr<ShadableIntersection> m_intersection_thrust;
+    Intersection *md_intersections = nullptr;
+    thrust::device_ptr<Intersection> m_intersection_thrust;
 
     MeshVertex *md_vertices;
     uint32_t *md_indices;

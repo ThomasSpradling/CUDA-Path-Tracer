@@ -26,21 +26,44 @@ namespace Math {
         return tangent * local.x + bitangent * local.y + normal * local.z;
     }
 
-    __host__ __device__ glm::vec3 SampleUniformHemisphere(const glm::vec3 &normal, const glm::vec2 &uniform) {
-        float z = uniform.x;
+    __host__ __device__ glm::vec3 SampleUniformHemisphere(const glm::vec3 &normal, thrust::default_random_engine &rng) {
+        glm::vec2 uv = Math::Sample2D(rng);
+        float z = uv.x;
         float r = sqrtf(std::max(0.0f, 1.0f - z*z));
 
-        float phi = 2 * c_PI * uniform.y;
+        float phi = 2 * c_PI * uv.y;
         glm::vec3 local = glm::vec3(r*cosf(phi), r*sinf(phi), z);
         return ToWorldSpace(local, normal);
     }
 
-    __host__ __device__ glm::vec3 SampleCosineHemisphere(const glm::vec3 &normal, const glm::vec2 &uniform) {        
-        float z = sqrtf(uniform.x);
+    __host__ __device__ glm::vec3 SampleCosineHemisphere(const glm::vec3 &normal, thrust::default_random_engine &rng) {        
+        glm::vec2 uv = Math::Sample2D(rng);
+        float z = sqrtf(uv.x);
         
-        float phi = 2 * c_PI * uniform.y;
+        float phi = 2 * c_PI * uv.y;
         float r = sqrtf(std::max(0.0f, 1.0f - z*z));
         glm::vec3 local = glm::vec3(r*cosf(phi), r*sinf(phi), z);
+        return ToWorldSpace(local, normal);
+    }
+
+    __host__ __device__ glm::vec3 SampleGGX(
+        const glm::vec3 &normal,
+        float roughness,
+        thrust::default_random_engine &rng
+    ) {
+        glm::vec2 uv = Math::Sample2D(rng);
+        float a2 = roughness * roughness;
+
+        float phi = 2.0f * c_PI * uv.x;
+        float cos_theta = sqrtf((1.0f - uv.y) / (1.0f + (a2 - 1.0f) * uv.y));
+        float sin_theta = sqrtf(glm::max(0.0f, 1.0f - cos_theta * cos_theta));
+
+        glm::vec3 local = glm::vec3(
+            sin_theta * cosf(phi),
+            sin_theta * sinf(phi),
+            cos_theta
+        );
+
         return ToWorldSpace(local, normal);
     }
 
@@ -52,11 +75,6 @@ namespace Math {
         float cos_in = glm::dot(normal, vec);
         glm::vec3 n = normal;
         
-        if (cos_in < 0) {
-            eta = 1.0f / eta;
-            cos_in = -cos_in;
-            n = -n;
-        }
         float sin2_in = fmaxf(0.f, 1.f - cos_in * cos_in);
         float sin2_t = sin2_in * eta * eta;
         if (sin2_t >= 1.f) {

@@ -4,34 +4,50 @@
     "light":
     {
       "TYPE":"Emitting",
-      "RGB":[1.0, 1.0, 1.0],
+      "COLOR":[1.0, 1.0, 1.0],
       "EMITTANCE":5.0
     },
     "diffuse_white":
     {
       "TYPE":"Diffuse",
-      "RGB":[0.98, 0.98, 0.98]
+      "ALBEDO":{
+        "RGB":[0.98, 0.98, 0.98]
+      }
     },
     "diffuse_red":
     {
       "TYPE":"Diffuse",
-      "RGB":[0.85, 0.35, 0.35]
+      "ALBEDO":{
+        "RGB":[0.85, 0.35, 0.35]
+      }
     },
     "diffuse_green":
     {
       "TYPE":"Diffuse",
-      "RGB":[0.35, 0.85, 0.35]
+      "ALBEDO":{
+        "RGB":[0.35, 0.85, 0.35]
+      }
     },
     "specular_white":
     {
-      "TYPE":"Mirror",
-      "RGB":[0.98, 0.98, 0.98]
+      "TYPE":"MetallicRoughness",
+      "ALBEDO":{
+        "RGB":[0.98, 0.98, 0.98]
+      },
+      "METALLIC": {
+        "VALUE":1.0
+      },
+      "ROUGHNESS": {
+        "VALUE":0.2
+      }
     },
     "glass":
     {
       "TYPE":"Dielectric",
-      "RGB":[0.98, 0.98, 0.98],
-      "INDEX_OF_REFRACTION": 1.2
+      "ALBEDO":{
+        "RGB":[0.98, 0.98, 0.98]
+      },
+      "INDEX_OF_REFRACTION": 1.6
     }
   },
   "Camera":
@@ -59,7 +75,7 @@
       "MATERIAL":"diffuse_white",
       "TRANS":[0.0,0.0,0.0],
       "ROTAT":[0.0,0.0,0.0],
-      "SCALE":[10.0,0.01,10.0]
+      "SCALE":[10.0,0.03,10.0]
     },
     {
       "TYPE":"cube",
@@ -99,7 +115,7 @@
     {
       "TYPE":"sphere",
       "MATERIAL":"glass",
-      "TRANS":[1.0, 3.0, 1.0],
+      "TRANS":[1.0, 3.0, 1.5],
       "ROTAT":[0.0,0.0,0.0],
       "SCALE":[3.0,3.0,3.0]
     }

@@ -74,7 +74,7 @@ void PathTracerApplication::Run() {
 
 void PathTracerApplication::SaveImage() {
     float samples = m_iteration;
-    Image image(m_scene.State().image);
+    Image3 image(m_scene.State().image);
 
     for (uint32_t y = 0; y < m_camera_state.height; ++y) {
         for (uint32_t x = 0; x < m_camera_state.width; ++x) {
@@ -86,7 +86,7 @@ void PathTracerApplication::SaveImage() {
     std::ostringstream oss;
     oss << filename << "." << m_start_time_string << "." << samples << "samp";
 
-    image.SavePNG(oss.str());
+    SavePNG(image, oss.str());
 }
 
 void PathTracerApplication::SetupCamera() {

@@ -4,7 +4,7 @@
         "light":
         {
             "TYPE":"Emitting",
-            "RGB":[1.0,1.0,1.0],
+            "COLOR":[1.0,1.0,1.0],
             "EMITTANCE":5.0
         }
     },

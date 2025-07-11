@@ -4,34 +4,53 @@
     "light":
     {
       "TYPE":"Emitting",
-      "RGB":[1.0, 1.0, 1.0],
+      "COLOR":[1.0, 1.0, 1.0],
       "EMITTANCE":5.0
     },
     "diffuse_white":
     {
       "TYPE":"Diffuse",
-      "RGB":[0.98, 0.98, 0.98]
+      "ALBEDO": {
+        "RGB": [0.98, 0.98, 0.98]
+      }
     },
     "diffuse_red":
     {
       "TYPE":"Diffuse",
-      "RGB":[0.85, 0.35, 0.35]
+      "ALBEDO": {
+        "RGB": [0.85, 0.35, 0.35]
+      }
     },
     "diffuse_green":
     {
       "TYPE":"Diffuse",
-      "RGB":[0.35, 0.85, 0.35]
+      "ALBEDO": {
+        "RGB":[0.35, 0.85, 0.35]
+      }
     },
     "glass":
     {
       "TYPE":"Dielectric",
-      "RGB":[0.98, 0.98, 0.98],
-      "INDEX_OF_REFRACTION": 1.2
+      "ALBEDO": {
+        "RGB":[0.98, 0.98, 0.98]
+      },
+      "INDEX_OF_REFRACTION": 1.2,
+      "ROUGHNESS": {
+        "VALUE": 0.75
+      }
     },
     "specular":
     {
-      "TYPE":"Mirror",
-      "RGB":[0.98, 0.98, 0.98]
+      "TYPE":"MetallicRoughness",
+      "ALBEDO": {
+        "RGB":[0.98, 0.98, 0.98]
+      },
+      "ROUGHNESS": {
+        "VALUE": 0.3
+      },
+      "METALLIC": {
+        "VALUE": 1.0
+      }
     }
   },
   "Camera":
@@ -56,6 +75,7 @@
     },
     {
       "TYPE":"cube",
+      "PATH": "cube.gltf",
       "MATERIAL":"diffuse_white",
       "TRANS":[0.0,0.0,0.0],
       "ROTAT":[0.0,0.0,0.0],
@@ -94,15 +114,15 @@
       "PATH": "teapot.gltf",
       "MATERIAL":"specular",
       "TRANS":[-2.0,6.0,-1.0],
-      "ROTAT":[0.0, -60.0, 0.0],
-      "SCALE":[0.1, 0.1, 0.1]
+      "ROTAT":[0.0,-60.0,0.0],
+      "SCALE":[0.1,0.1,0.1]
     },
     {
       "TYPE":"gltf",
       "PATH": "teapot.gltf",
       "MATERIAL":"glass",
-      "TRANS":[2.0,2.0,1.0],
-      "ROTAT":[0.0,-80.0,10.0],
+      "TRANS":[2.0,1.65,1.0],
+      "ROTAT":[0.0,-80.0,0.0],
       "SCALE":[0.1,0.1,0.1]
     },
     {

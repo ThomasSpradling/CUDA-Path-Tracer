@@ -7,24 +7,27 @@
 #include <glm/glm.hpp>
 #define GLM_ENABLE_EXPERIMENTAL 
 #include <glm/gtx/intersect.hpp>
-#include "scene.h"
 
 #include <thrust/random.h>
+
+struct Intersection {
+    float t = 0.0f;
+    glm::vec3 pos {};
+    glm::vec3 normal {};
+    glm::vec2 uv {};
+    int material_id = -1;
+};
 
 __host__ __device__ float BoxIntersectionTest(
     const Geometry &box,
     const Ray &r,
-    glm::vec3& intersectionPoint,
-    glm::vec3& normal,
-    bool& outside);
+    Intersection &intersection);
 
 __host__ __device__
 float SphereIntersectionTest(
     const Geometry& sphere,
     const Ray& r,
-    glm::vec3& intersectionPoint,
-    glm::vec3& normal,
-    bool& outside);
+    Intersection &intersection);
 
 __host__ __device__
 float TriangleIntersectionTest(
@@ -40,9 +43,7 @@ float NaivePrimitiveIntersection(
     const MeshVertex *vertices,
     const uint32_t *indices,
     const Ray &r,
-    glm::vec3 &intersection_point,
-    glm::vec3 &normal,
-    bool &outside);
+    Intersection &intersection);
 
 #if USE_BVH
 __device__ float IntersectBVH(
@@ -52,8 +53,6 @@ __device__ float IntersectBVH(
     const MeshVertex *vertex_array,
     const uint32_t *index_array,
     const Ray &r,
-    glm::vec3 &intersection_point,
-    glm::vec3 &hit_n,
-    bool &outside);
+    Intersection &intersection);
 
 #endif

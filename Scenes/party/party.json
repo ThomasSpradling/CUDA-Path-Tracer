@@ -4,39 +4,57 @@
     "light":
     {
       "TYPE":"Emitting",
-      "RGB":[1.0, 1.0, 1.0],
+      "COLOR":[1.0, 1.0, 1.0],
       "EMITTANCE":5.0
     },
     "diffuse_white":
     {
       "TYPE":"Diffuse",
-      "RGB":[0.98, 0.98, 0.98]
+      "ALBEDO":{
+        "RGB": [0.98, 0.98, 0.98]
+      }
     },
     "diffuse_red":
     {
       "TYPE":"Diffuse",
-      "RGB":[0.85, 0.35, 0.35]
+      "ALBEDO":{
+        "RGB": [0.85, 0.35, 0.35]
+      }
     },
     "diffuse_green":
     {
       "TYPE":"Diffuse",
-      "RGB":[0.35, 0.85, 0.35]
+      "ALBEDO":{
+        "RGB": [0.35, 0.85, 0.35]
+      }
     },
     "diffuse_blue":
     {
       "TYPE":"Diffuse",
-      "RGB":[0.65, 0.65, 0.85]
+      "ALBEDO":{
+        "RGB": [0.65, 0.65, 0.85]
+      }
     },
     "glass":
     {
       "TYPE":"Dielectric",
-      "RGB":[0.98, 0.58, 0.3],
+      "ALBEDO":{
+        "RGB": [0.79, 0.58, 0.3]
+      },
       "INDEX_OF_REFRACTION": 1.2
     },
     "gold":
     {
-      "TYPE":"Mirror",
-      "RGB":[0.98, 0.98, 0.6]
+      "TYPE":"MetallicRoughness",
+      "ALBEDO":{
+        "RGB": [0.98, 0.98, 0.6]
+      },
+      "ROUGHNESS": {
+        "VALUE": 0.1
+      },
+      "METALLIC": {
+        "VALUE": 1.0
+      }
     }
   },
   "Camera":
@@ -45,7 +63,7 @@
     "FOVY":45.0,
     "ITERATIONS":20000,
     "DEPTH":8,
-    "FILE":"cornell",
+    "FILE":"party",
     "EYE":[0.0,5.0,10.5],
     "LOOKAT":[0.0,5.0,0.0],
     "UP":[0.0,1.0,0.0]
@@ -105,7 +123,7 @@
     {
       "TYPE":"gltf",
       "PATH": "dragon.gltf",
-      "MATERIAL":"diffuse_white",
+      "MATERIAL":"glass",
       "TRANS":[-2.0,4.0,-2.0],
       "ROTAT":[90,0,-90],
       "SCALE":[7,7,7]
@@ -113,10 +131,19 @@
     {
       "TYPE":"gltf",
       "PATH": "buddha.gltf",
-      "MATERIAL":"diffuse_white",
+      "MATERIAL":"gold",
       "TRANS":[0.0,2.0,2.0],
       "ROTAT":[90,0,-180],
       "SCALE":[7,7,7]
+    },
+
+    {
+      "TYPE":"gltf",
+      "PATH": "armadillo.gltf",
+      "MATERIAL":"diffuse_green",
+      "TRANS":[-2.0,1.0,5.0],
+      "ROTAT":[90,0,-180],
+      "SCALE":[1,1,1]
     }
   ]
 }

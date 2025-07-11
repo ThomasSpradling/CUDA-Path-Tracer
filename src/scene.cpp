@@ -1,10 +1,15 @@
 #include "scene.h"
+#include "Materials/Lambertian.h"
+#include "Materials/RoughDielectric.h"
+#include "Texture.h"
 #include "exception.h"
 #include "glm/gtc/matrix_inverse.hpp"
 #include "material.h"
 #include <cstdint>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <new>
 #include <nlohmann/json.hpp>
 #include <string>
 #include <unordered_map>
@@ -34,6 +39,8 @@ Scene::Scene(const std::string &filename) {
 void Scene::LoadFromJSON(const std::string &filename) {
     fs::path scene_path = filename;
     fs::path scene_dir = scene_path.parent_path();
+    m_scene_dir = scene_dir;
+
     std::ifstream file(scene_path);
 
     PT_ASSERT(file.is_open(),
@@ -41,29 +48,67 @@ void Scene::LoadFromJSON(const std::string &filename) {
 
     json data = json::parse(file);
     const auto &material_data = data["Materials"];
+    m_materials.reserve(material_data.size());
+
     std::unordered_map<std::string, uint32_t> material_ids;
+
     for (const auto &[key, value] : material_data.items()) {
-        Material material {};
-        if (value["TYPE"] == "Diffuse") {
-            const auto &color = value["RGB"];
-            material.base_color = glm::vec3(color[0], color[1], color[2]);
-            material.type = Material::Type::Diffuse;
-        } else if (value["TYPE"] == "Emitting") {
-            const auto &color = value["RGB"];
-            material.base_color = glm::vec3(color[0], color[1], color[2]);
+        uint32_t mat_id = static_cast<uint32_t>(m_materials.size());
+        material_ids[key] = mat_id;
+
+        m_materials.emplace_back();  
+        Material &material = m_materials.back();
+
+        if (value["TYPE"] == "Diffuse" || value["TYPE"] == "Lambertian") {
+            material.type = Material::Type::Lambertian;
+            new (&material.mat.lambert) Lambertian{};
+
+            LoadTexture(material.mat.lambert.albedo, value["ALBEDO"]);
+
+        } else if (value["TYPE"] == "Emitting" || value["TYPE"] == "Light") {
+            const auto &color = value["COLOR"];
+
+            new (&material.mat.light) Light{};
             material.type = Material::Type::Light;
+
+            material.mat.light = Light{
+                .base_color = glm::vec3(color[0], color[1], color[2]),
+            };
+
         } else if (value["TYPE"] == "Dielectric") {
-            const auto &color = value["RGB"];
-            material.base_color = glm::vec3(color[0], color[1], color[2]);
+
+            new (&material.mat.dielectric) PerfectDielectric{};
             material.type = Material::Type::Dielectric;
-            material.ior = value["INDEX_OF_REFRACTION"];
+
+            LoadTexture(material.mat.dielectric.albedo, value["ALBEDO"]);
+            material.mat.dielectric.ior = value["INDEX_OF_REFRACTION"];
+
         } else if (value["TYPE"] == "Mirror") {
-            const auto &color = value["RGB"];
-            material.base_color = glm::vec3(color[0], color[1], color[2]);
+
+            new (&material.mat.mirror) PerfectMirror{};
             material.type = Material::Type::Mirror;
+
+            LoadTexture(material.mat.mirror.albedo, value["ALBEDO"]);
+
+        } else if (value["TYPE"] == "MetallicRoughness") {
+
+            new (&material.mat.metallic_roughness) MetallicRoughness{};
+            material.type = Material::Type::Metallic_Roughness;
+
+            LoadTexture(material.mat.metallic_roughness.albedo, value["ALBEDO"]);
+            LoadTexture(material.mat.metallic_roughness.metallic_map, value["METALLIC"]);
+            LoadTexture(material.mat.metallic_roughness.roughness_map, value["ROUGHNESS"]);
+        } else if (value["TYPE"] == "RoughDielectric") {        
+            
+            new (&material.mat.rough_dielectric) RoughDielectric{};
+            material.type = Material::Type::RoughDielectric;
+
+            LoadTexture(material.mat.rough_dielectric.albedo, value["ALBEDO"]);
+            LoadTexture(material.mat.rough_dielectric.roughness_map, value["ROUGHNESS"]);
+            material.mat.dielectric.ior = value["INDEX_OF_REFRACTION"];
         }
         //  else if (value["TYPE"] == "Glass") {
-        //     const auto &color = value["RGB"];
+        //     const auto &color = value["ALBEDO"];
         //     material.base_color = glm::vec3(color[0], color[1], color[2]);
         //     material.has_refractive = true;
         //     material.index_of_refraction = value["INDEX_OF_REFRACTION"];
@@ -79,8 +124,8 @@ void Scene::LoadFromJSON(const std::string &filename) {
         //     std::cout << "DI: "<< material.index_of_refraction << std::endl;
         // }
 
-        material_ids[key] = m_materials.size();
-        m_materials.emplace_back(material);
+        // material_ids[key] = m_materials.size();
+        // m_materials.emplace_back(material);
     }
 
     const auto &object_data = data["Objects"];
@@ -154,7 +199,7 @@ void Scene::LoadFromJSON(const std::string &filename) {
                 model_path = scene_dir / model_path;
             }
             if (!fs::exists(model_path))
-                PT_ERROR("gLTF file not found: " + model_path.string());
+                PT_ERROR("glTF file not found: " + model_path.string());
 
             model.LoadGLTF(model_path.string());
 
@@ -222,4 +267,6 @@ void Scene::LoadFromJSON(const std::string &filename) {
     camera.default_params.front = camera.front;
     camera.default_params.position = camera.position;
     camera.default_params.look_at = camera.look_at;
+
+    std::cout << "Finished loading scene!\n";
 }

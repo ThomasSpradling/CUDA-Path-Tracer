@@ -1,0 +1,613 @@
+{
+  "Materials": {
+    "light": {
+      "TYPE": "Emitting",
+      "COLOR": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "EMITTANCE": 5.0
+    },
+    "diffuse_white": {
+      "TYPE": "Diffuse",
+      "ALBEDO": [
+        0.98,
+        0.98,
+        0.98
+      ]
+    },
+    "diffuse_red": {
+      "TYPE": "Diffuse",
+      "ALBEDO": [
+        0.85,
+        0.35,
+        0.35
+      ]
+    },
+    "diffuse_green": {
+      "TYPE": "Diffuse",
+      "ALBEDO": [
+        0.35,
+        0.85,
+        0.35
+      ]
+    },
+    "mat_r1_m0": {
+      "TYPE": "MetallicRoughness",
+      "ALBEDO": [
+        0.98,
+        0.98,
+        0.98
+      ],
+      "METALLIC": 0,
+      "ROUGHNESS": 1
+    },
+    "mat_r1_m0.5": {
+      "TYPE": "MetallicRoughness",
+      "ALBEDO": [
+        0.98,
+        0.98,
+        0.98
+      ],
+      "METALLIC": 0.5,
+      "ROUGHNESS": 1
+    },
+    "mat_r1_m1": {
+      "TYPE": "MetallicRoughness",
+      "ALBEDO": [
+        0.98,
+        0.98,
+        0.98
+      ],
+      "METALLIC": 1,
+      "ROUGHNESS": 1
+    },
+    "mat_r0.75_m0": {
+      "TYPE": "MetallicRoughness",
+      "ALBEDO": [
+        0.98,
+        0.98,
+        0.98
+      ],
+      "METALLIC": 0,
+      "ROUGHNESS": 0.75
+    },
+    "mat_r0.75_m0.5": {
+      "TYPE": "MetallicRoughness",
+      "ALBEDO": [
+        0.98,
+        0.98,
+        0.98
+      ],
+      "METALLIC": 0.5,
+      "ROUGHNESS": 0.75
+    },
+    "mat_r0.75_m1": {
+      "TYPE": "MetallicRoughness",
+      "ALBEDO": [
+        0.98,
+        0.98,
+        0.98
+      ],
+      "METALLIC": 1,
+      "ROUGHNESS": 0.75
+    },
+    "mat_r0.5_m0": {
+      "TYPE": "MetallicRoughness",
+      "ALBEDO": [
+        0.98,
+        0.98,
+        0.98
+      ],
+      "METALLIC": 0,
+      "ROUGHNESS": 0.5
+    },
+    "mat_r0.5_m0.5": {
+      "TYPE": "MetallicRoughness",
+      "ALBEDO": [
+        0.98,
+        0.98,
+        0.98
+      ],
+      "METALLIC": 0.5,
+      "ROUGHNESS": 0.5
+    },
+    "mat_r0.5_m1": {
+      "TYPE": "MetallicRoughness",
+      "ALBEDO": [
+        0.98,
+        0.98,
+        0.98
+      ],
+      "METALLIC": 1,
+      "ROUGHNESS": 0.5
+    },
+    "mat_r0.25_m0": {
+      "TYPE": "MetallicRoughness",
+      "ALBEDO": [
+        0.98,
+        0.98,
+        0.98
+      ],
+      "METALLIC": 0,
+      "ROUGHNESS": 0.25
+    },
+    "mat_r0.25_m0.5": {
+      "TYPE": "MetallicRoughness",
+      "ALBEDO": [
+        0.98,
+        0.98,
+        0.98
+      ],
+      "METALLIC": 0.5,
+      "ROUGHNESS": 0.25
+    },
+    "mat_r0.25_m1": {
+      "TYPE": "MetallicRoughness",
+      "ALBEDO": [
+        0.98,
+        0.98,
+        0.98
+      ],
+      "METALLIC": 1,
+      "ROUGHNESS": 0.25
+    },
+    "mat_r0.01_m0": {
+      "TYPE": "MetallicRoughness",
+      "ALBEDO": [
+        0.98,
+        0.98,
+        0.98
+      ],
+      "METALLIC": 0,
+      "ROUGHNESS": 0.01
+    },
+    "mat_r0.01_m0.5": {
+      "TYPE": "MetallicRoughness",
+      "ALBEDO": [
+        0.98,
+        0.98,
+        0.98
+      ],
+      "METALLIC": 0.5,
+      "ROUGHNESS": 0.01
+    },
+    "mat_r0.01_m1": {
+      "TYPE": "MetallicRoughness",
+      "ALBEDO": [
+        0.98,
+        0.98,
+        0.98
+      ],
+      "METALLIC": 1,
+      "ROUGHNESS": 0.01
+    }
+  },
+  "Camera": {
+    "RES": [
+      800,
+      800
+    ],
+    "FOVY": 45.0,
+    "ITERATIONS": 20000,
+    "DEPTH": 8,
+    "FILE": "cornell_grid",
+    "EYE": [
+      0.0,
+      6.0,
+      12.0
+    ],
+    "LOOKAT": [
+      0.0,
+      3.0,
+      0.0
+    ],
+    "UP": [
+      0.0,
+      1.0,
+      0.0
+    ]
+  },
+  "Objects": [
+    {
+      "TYPE": "cube",
+      "MATERIAL": "light",
+      "TRANS": [
+        0.0,
+        10.0,
+        0.0
+      ],
+      "ROTAT": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "SCALE": [
+        3.0,
+        0.3,
+        3.0
+      ]
+    },
+    {
+      "TYPE": "cube",
+      "MATERIAL": "diffuse_white",
+      "TRANS": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "ROTAT": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "SCALE": [
+        10.0,
+        0.01,
+        10.0
+      ]
+    },
+    {
+      "TYPE": "cube",
+      "MATERIAL": "diffuse_white",
+      "TRANS": [
+        0.0,
+        10.0,
+        0.0
+      ],
+      "ROTAT": [
+        0.0,
+        0.0,
+        90.0
+      ],
+      "SCALE": [
+        0.01,
+        10.0,
+        10.0
+      ]
+    },
+    {
+      "TYPE": "cube",
+      "MATERIAL": "diffuse_white",
+      "TRANS": [
+        0.0,
+        5.0,
+        -5.0
+      ],
+      "ROTAT": [
+        0.0,
+        90.0,
+        0.0
+      ],
+      "SCALE": [
+        0.01,
+        10.0,
+        10.0
+      ]
+    },
+    {
+      "TYPE": "cube",
+      "MATERIAL": "diffuse_red",
+      "TRANS": [
+        -5.0,
+        5.0,
+        0.0
+      ],
+      "ROTAT": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "SCALE": [
+        0.01,
+        10.0,
+        10.0
+      ]
+    },
+    {
+      "TYPE": "cube",
+      "MATERIAL": "diffuse_green",
+      "TRANS": [
+        5.0,
+        5.0,
+        0.0
+      ],
+      "ROTAT": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "SCALE": [
+        0.01,
+        10.0,
+        10.0
+      ]
+    },
+    {
+      "TYPE": "sphere",
+      "MATERIAL": "mat_r1_m0",
+      "TRANS": [
+        -4.0,
+        2.0,
+        -4.0
+      ],
+      "ROTAT": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "SCALE": [
+        1.5,
+        1.5,
+        1.5
+      ]
+    },
+    {
+      "TYPE": "sphere",
+      "MATERIAL": "mat_r1_m0.5",
+      "TRANS": [
+        0.0,
+        2.0,
+        -4.0
+      ],
+      "ROTAT": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "SCALE": [
+        1.5,
+        1.5,
+        1.5
+      ]
+    },
+    {
+      "TYPE": "sphere",
+      "MATERIAL": "mat_r1_m1",
+      "TRANS": [
+        4.0,
+        2.0,
+        -4.0
+      ],
+      "ROTAT": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "SCALE": [
+        1.5,
+        1.5,
+        1.5
+      ]
+    },
+    {
+      "TYPE": "sphere",
+      "MATERIAL": "mat_r0.75_m0",
+      "TRANS": [
+        -4.0,
+        2.0,
+        -2.0
+      ],
+      "ROTAT": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "SCALE": [
+        1.5,
+        1.5,
+        1.5
+      ]
+    },
+    {
+      "TYPE": "sphere",
+      "MATERIAL": "mat_r0.75_m0.5",
+      "TRANS": [
+        0.0,
+        2.0,
+        -2.0
+      ],
+      "ROTAT": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "SCALE": [
+        1.5,
+        1.5,
+        1.5
+      ]
+    },
+    {
+      "TYPE": "sphere",
+      "MATERIAL": "mat_r0.75_m1",
+      "TRANS": [
+        4.0,
+        2.0,
+        -2.0
+      ],
+      "ROTAT": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "SCALE": [
+        1.5,
+        1.5,
+        1.5
+      ]
+    },
+    {
+      "TYPE": "sphere",
+      "MATERIAL": "mat_r0.5_m0",
+      "TRANS": [
+        -4.0,
+        2.0,
+        0.0
+      ],
+      "ROTAT": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "SCALE": [
+        1.5,
+        1.5,
+        1.5
+      ]
+    },
+    {
+      "TYPE": "sphere",
+      "MATERIAL": "mat_r0.5_m0.5",
+      "TRANS": [
+        0.0,
+        2.0,
+        0.0
+      ],
+      "ROTAT": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "SCALE": [
+        1.5,
+        1.5,
+        1.5
+      ]
+    },
+    {
+      "TYPE": "sphere",
+      "MATERIAL": "mat_r0.5_m1",
+      "TRANS": [
+        4.0,
+        2.0,
+        0.0
+      ],
+      "ROTAT": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "SCALE": [
+        1.5,
+        1.5,
+        1.5
+      ]
+    },
+    {
+      "TYPE": "sphere",
+      "MATERIAL": "mat_r0.25_m0",
+      "TRANS": [
+        -4.0,
+        2.0,
+        2.0
+      ],
+      "ROTAT": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "SCALE": [
+        1.5,
+        1.5,
+        1.5
+      ]
+    },
+    {
+      "TYPE": "sphere",
+      "MATERIAL": "mat_r0.25_m0.5",
+      "TRANS": [
+        0.0,
+        2.0,
+        2.0
+      ],
+      "ROTAT": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "SCALE": [
+        1.5,
+        1.5,
+        1.5
+      ]
+    },
+    {
+      "TYPE": "sphere",
+      "MATERIAL": "mat_r0.25_m1",
+      "TRANS": [
+        4.0,
+        2.0,
+        2.0
+      ],
+      "ROTAT": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "SCALE": [
+        1.5,
+        1.5,
+        1.5
+      ]
+    },
+    {
+      "TYPE": "sphere",
+      "MATERIAL": "mat_r0.01_m0",
+      "TRANS": [
+        -4.0,
+        2.0,
+        4.0
+      ],
+      "ROTAT": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "SCALE": [
+        1.5,
+        1.5,
+        1.5
+      ]
+    },
+    {
+      "TYPE": "sphere",
+      "MATERIAL": "mat_r0.01_m0.5",
+      "TRANS": [
+        0.0,
+        2.0,
+        4.0
+      ],
+      "ROTAT": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "SCALE": [
+        1.5,
+        1.5,
+        1.5
+      ]
+    },
+    {
+      "TYPE": "sphere",
+      "MATERIAL": "mat_r0.01_m1",
+      "TRANS": [
+        4.0,
+        2.0,
+        4.0
+      ],
+      "ROTAT": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "SCALE": [
+        1.5,
+        1.5,
+        1.5
+      ]
+    }
+  ]
+}

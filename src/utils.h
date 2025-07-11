@@ -1,5 +1,6 @@
 #pragma once
 
+#include <optional>
 #include <volk.h>
 #include <algorithm>
 #include <string>
@@ -40,4 +41,20 @@ inline std::string CurrentTimeString() {
     char buf[sizeof "0000-00-00_00-00-00z"];
     strftime(buf, sizeof buf, "%Y-%m-%d_%H-%M-%Sz", gmtime(&now));
     return std::string(buf);
+}
+
+static std::optional<fs::path> ResolvePath(
+    const fs::path &candidate,
+    const fs::path &base_dir)
+{
+    if (fs::exists(candidate)) {
+        return fs::absolute(candidate);
+    }
+
+    fs::path joined = base_dir / candidate;
+    if (fs::exists(joined)) {
+        return fs::absolute(joined);
+    }
+
+    return std::nullopt;
 }

@@ -4,34 +4,44 @@
     "light":
     {
       "TYPE":"Emitting",
-      "RGB":[1.0, 1.0, 1.0],
+      "COLOR":[1.0, 1.0, 1.0],
       "EMITTANCE":5.0
     },
     "diffuse_white":
     {
       "TYPE":"Diffuse",
-      "RGB":[0.98, 0.98, 0.98]
+      "ALBEDO": {
+        "RGB": [0.98, 0.98, 0.98]
+      }
     },
     "diffuse_red":
     {
       "TYPE":"Diffuse",
-      "RGB":[0.85, 0.35, 0.35]
+      "ALBEDO": {
+        "PATH": "red_brick_diff_4k.jpg",
+      }
     },
     "diffuse_green":
     {
       "TYPE":"Diffuse",
-      "RGB":[0.35, 0.85, 0.35]
+      "ALBEDO": {
+        "RGB": [0.35, 0.85, 0.35]
+      }
     },
     "glass":
     {
       "TYPE":"Dielectric",
-      "RGB":[0.98, 0.98, 0.98],
+      "ALBEDO": {
+        "RGB": [0.98, 0.98, 0.98]
+      },
       "INDEX_OF_REFRACTION": 1.2
     },
     "specular":
     {
       "TYPE":"Mirror",
-      "RGB":[0.98, 0.98, 0.98]
+      "ALBEDO": {
+        "RGB": [0.98, 0.98, 0.98]
+      }
     }
   },
   "Camera":

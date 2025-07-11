@@ -7,44 +7,67 @@
 #include <stb_image.h>
 #include "exception.h"
 
-Image::Image() : Image(0, 0) {}
+void Load1DImageFromFile(Image1 &image, const fs::path &filename) {
+    std::string extension = ToLowercase(filename.extension().string());
 
-Image::Image(uint32_t width, uint32_t height)
-    : m_width(width)
-    , m_height(height)
-    , m_data(m_width * m_height, glm::vec3(0.0f))
-{}
+    if (extension == ".jpg" ||
+        extension == ".png" ||
+        extension == ".tga" ||
+        extension == ".bmp" ||
+        extension == ".psd" ||
+        extension == ".gif" ||
+        extension == ".hdr" ||
+        extension == ".pic"
+    ) {
+        int width, height, channels;
+        float *data = stbi_loadf(filename.string().c_str(), &width, &height, &channels, 1);
+        if (data == nullptr) {
+            PT_ERROR(std::format("Failure loading image '{}'.", filename.string()));
+        }
+        image.SetSize(width, height);
 
-Image::~Image() {}
-
-void Image::SetSize(uint32_t width, uint32_t height) {
-    m_width = width;
-    m_height = height;
-    m_data.resize(m_width * m_height);
-    Clear(glm::vec3(0.0f));
+        for (uint32_t i = 0; i < width * height; ++i) {
+            image[i] = data[i];
+        }
+        stbi_image_free(data);
+    } else {
+        PT_ERROR(std::format("Unsupported file format for file '{}'", filename.string()));
+    }
 }
 
-void Image::Clear(const glm::vec3 &value) {
-    std::fill(m_data.begin(), m_data.end(), value);
+void Load3DImageFromFile(Image3 &image, const fs::path &filename) {
+    std::string extension = ToLowercase(filename.extension().string());
+
+    if (extension == ".jpg" ||
+        extension == ".png" ||
+        extension == ".tga" ||
+        extension == ".bmp" ||
+        extension == ".psd" ||
+        extension == ".gif" ||
+        extension == ".hdr" ||
+        extension == ".pic"
+    ) {
+        int width, height, channels;
+        float *data = stbi_loadf(filename.string().c_str(), &width, &height, &channels, 3);
+        if (data == nullptr) {
+            PT_ERROR(std::format("Failure loading image '{}'.", filename.string()));
+        }
+        image.SetSize(width, height);
+
+        int j = 0;
+        for (uint32_t i = 0; i < width * height; ++i) {
+            image[i].x = data[j++];
+            image[i].y = data[j++];
+            image[i].z = data[j++];
+        }
+        stbi_image_free(data);
+    } else {
+        PT_ERROR(std::format("Unsupported file format for file '{}'", filename.string()));
+    }
 }
 
-glm::vec3 &Image::operator()(uint32_t x) {
-    return m_data[x];
-}
-
-const glm::vec3 &Image::operator()(uint32_t x) const {
-    return m_data[x];
-}
-
-glm::vec3 &Image::operator()(uint32_t x, uint32_t y) {
-    return m_data[y * m_width + x];
-}
-
-const glm::vec3 &Image::operator()(uint32_t x, uint32_t y) const {
-    return m_data[y * m_width + x];
-}
-
-Image Image::LoadFromFile(const fs::path &filename) {
+template<typename T>
+Image<T> LoadImageFromFile(const fs::path &filename) {
     std::string extension = ToLowercase(filename.extension().string());
 
     if (extension == ".jpg" ||
@@ -62,7 +85,7 @@ Image Image::LoadFromFile(const fs::path &filename) {
             PT_ERROR(std::format("Failure loading image '{}'.", filename.string()));
         }
 
-        Image image(width, height);
+        Image<T> image(width, height);
 
         int j = 0;
         for (uint32_t i = 0; i < width * height; ++i) {
@@ -77,14 +100,14 @@ Image Image::LoadFromFile(const fs::path &filename) {
     }
 }
 
-void Image::SavePNG(const std::string &filename) const {
-    if (m_data.empty()) return;
+void SavePNG(const Image3 &image, const std::string &filename) {
+    if (image.Empty()) return;
 
-    std::vector<uint8_t> output(3 * m_width * m_height);
-    for (uint32_t j = 0; j < m_height; ++j) {
-        for (uint32_t i = 0; i < m_width; ++i) {
-            int index = j * m_width + i;
-            glm::vec3 pixel = glm::clamp(m_data[index], glm::vec3(0), glm::vec3(1)) * 255.0f;
+    std::vector<uint8_t> output(3 * image.Width() * image.Height());
+    for (uint32_t j = 0; j < image.Height(); ++j) {
+        for (uint32_t i = 0; i < image.Width(); ++i) {
+            int index = j * image.Width() + i;
+            glm::vec3 pixel = glm::clamp(image[index], glm::vec3(0), glm::vec3(1)) * 255.0f;
             output[3 * index + 0] = static_cast<uint8_t>(pixel.r);
             output[3 * index + 1] = static_cast<uint8_t>(pixel.g);
             output[3 * index + 2] = static_cast<uint8_t>(pixel.b);
@@ -92,14 +115,14 @@ void Image::SavePNG(const std::string &filename) const {
     }
     std::string result = filename + ".png";
 
-    stbi_write_png(result.c_str(), m_width, m_height, 3, output.data(), m_width * 3);
+    stbi_write_png(result.c_str(), image.Width(), image.Height(), 3, output.data(), image.Width() * 3);
     std::cout << "Saved " << result << std::endl;
 }
 
-void Image::SaveHDR(const std::string &filename) const {
-    if (m_data.empty()) return;
+void SaveHDR(const Image3 &image, const std::string &filename) {
+    if (image.Empty()) return;
     std::string result = filename + ".hdr";
     
-    stbi_write_hdr(result.c_str(), m_width, m_height, 3, reinterpret_cast<const float *>(m_data.data()));
+    stbi_write_hdr(result.c_str(), image.Width(), image.Height(), 3, reinterpret_cast<const float *>(image.Data()));
     std::cout << "Saved " << result << std::endl;
 }

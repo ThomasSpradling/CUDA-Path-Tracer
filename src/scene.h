@@ -7,95 +7,12 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/matrix_inverse.hpp>
+#include "geometry.h"
 
 #include <cuda_runtime.h>
 #include "GLTFModel.h"
+#include "json.hpp"
 #include "material.h"
-
-struct Ray {
-    glm::vec3 origin;
-    glm::vec3 direction;
-
-    __host__ __device__ inline glm::vec3 operator()(float time) const {
-        return origin + (time - 1e-6f) * glm::normalize(direction);
-    }
-
-    __host__ __device__ static Ray Make(const glm::vec3 &origin, const glm::vec3 &direction) {
-        return Ray{origin, direction};
-    }
-
-    __host__ __device__ static Ray MakeOffseted(const glm::vec3 &origin, const glm::vec3 &direction) {
-        return Ray{origin + direction * 1e-3f, direction};
-    }
-};
-
-struct AABB {
-    glm::vec3 min{FLT_MAX};
-    glm::vec3 max{-FLT_MAX};
-
-    __host__ __device__ inline void AddPoint(const glm::vec3 &point) {
-        min = glm::min(min, point);
-        max = glm::max(max, point);
-    }
-    __host__ __device__ inline void Union(const AABB &other) {
-        min = glm::min(min, other.min);
-        max = glm::max(max, other.max);
-    }
-
-    __host__ __device__ inline bool IsEmpty() const {
-        return (min.x > max.x) || (min.y > max.y) || (min.z > max.z);
-    }
-
-    __host__ __device__ inline glm::vec3 Extent() const {
-        return max - min;
-    }
-
-    __host__ __device__ inline float SurfaceArea() const {
-        glm::vec3 d = max - min;
-        d = glm::max(d, glm::vec3(0.0f));
-        return 2.0f * (d.x * d.y + d.y * d.z + d.z * d.x);
-    }
-
-    __host__ __device__ inline float Volume() const {
-        glm::vec3 d = max - min;
-        d = glm::max(d, glm::vec3(0.0f));
-        return d.x * d.y * d.z;
-    }
-};
-
-enum class GeometryType {
-    Sphere,
-    Cube,
-    GLTF_Primitive,
-};
-
-struct TriangleMesh {
-    uint32_t first_index;
-    uint32_t index_count;
-    uint32_t first_vertex;
-    uint32_t vertex_count;
-};
-
-struct Geometry {
-    enum GeometryType type;
-    int material_id;
-
-    glm::vec3 translation {};
-    glm::vec3 rotation {};
-    glm::vec3 scale { 1.0f, 1.0f, 1.0f };
-
-    glm::mat4 transform { 1.0f };
-    glm::mat4 inv_transform { 1.0f };
-    glm::mat4 inv_transpose { 1.0f };
-
-    TriangleMesh mesh;
-
-    int first_bvh_node = -1;
-    int bvh_node_count = -1;
-
-    int first_tri_index = -1;
-    int tri_index_count = -1;
-};
 
 // struct Material {
 //     glm::vec3 color;
@@ -133,7 +50,7 @@ struct RenderState {
     Camera camera {};
     uint32_t iterations;
     int trace_depth;
-    Image image;
+    Image3 image;
     std::string output_name;
 };
 
@@ -145,13 +62,6 @@ struct PathSegment {
     int remaining_bounces;
 
     bool hit = false;
-};
-
-struct ShadableIntersection {
-    float t;
-    glm::vec3 pos;
-    glm::vec3 normal;
-    int material_id;
 };
 
 class Scene {
@@ -181,6 +91,56 @@ private:
     std::vector<TriangleMesh> m_mesh_buffer;
     std::vector<MeshVertex> m_vertices;
     std::vector<uint32_t> m_indices;
+
+    fs::path m_scene_dir;
 private:
     void LoadFromJSON(const std::string &filename);
+    Texture<glm::vec3> LoadTexture3D(const nlohmann::json &parsed_texture);
+
+    template<typename T>
+    void LoadTexture(Texture<T> &texture, const nlohmann::json &parsed_texture) {
+        if (parsed_texture.contains("PATH")) {
+            const auto &path = parsed_texture["PATH"];
+            if (!path.is_string()) {
+                std::cerr << "Scene Warning: Invalid path: '" << path << "'!" << std::endl;
+            }
+
+            if (auto resolved = ResolvePath(path, m_scene_dir)) {
+                texture.type = TextureType::ImageTexture;
+                texture.tex.image_texture.LoadTexture(resolved->string());
+                texture.tex.image_texture.m_offset = glm::vec2(0.0f);
+                texture.tex.image_texture.m_scale = glm::vec2(1.0f);
+                return;
+            }
+        }
+
+        if constexpr (std::is_same_v<T, glm::vec3>) {
+            if (parsed_texture.contains("RGB")) {
+                const auto &c = parsed_texture["RGB"];
+                if (!c.is_array() || c.size() != 3) {
+                    std::cerr << "Scene Warning: Expected RGB color to have 3 components!" << std::endl;
+                    texture = glm::vec3(0.0f);
+                }
+    
+                texture = glm::vec3(c[0], c[1], c[2]);
+                return;
+            }
+        } else if constexpr (std::is_same_v<T, float>) {
+            if (parsed_texture.contains("VALUE")) {
+                const auto &c = parsed_texture["VALUE"];
+                if (!c.is_number()) {
+                    std::cerr << "Scene Warning: Expected value to be float!" << std::endl;
+                    texture = 0.0f;
+                }
+    
+                texture = c;
+                return;
+            }
+        }
+
+        std::cerr << "Invalid texture: \n";
+
+        texture = T(0.0f);
+        return;
+    }
 };
