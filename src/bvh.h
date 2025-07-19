@@ -3,12 +3,13 @@
 #include "MathUtils.h"
 #include "settings.h"
 #include <functional>
-#if USE_BVH
 #include "geometry.h"
 #include <glm/glm.hpp>
 #include <vector>
-// Given geometry, verts, and indices, create bounding volume hierarchy
 
+#if USE_BVH
+
+// Given geometry, verts, and indices, create bounding volume hierarchy
 namespace BVH {
     struct Bin {
         AABB bounds;

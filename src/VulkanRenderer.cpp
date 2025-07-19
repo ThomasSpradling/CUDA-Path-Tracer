@@ -1,7 +1,8 @@
+#include "CudaUtils.h"
 #include "platform.h"
 
 #include "VulkanRenderer.h"
-#include "exception.h"
+#include "VkUtils.h"
 #include "utils.h"
 #include <cuda_runtime_api.h>
 #include <driver_types.h>

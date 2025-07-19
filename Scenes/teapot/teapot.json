@@ -5,7 +5,7 @@
     {
       "TYPE":"Emitting",
       "COLOR":[1.0, 1.0, 1.0],
-      "EMITTANCE":5.0
+      "EMITTANCE": 100.0
     },
     "diffuse_white":
     {
@@ -39,6 +39,19 @@
         "VALUE": 0.75
       }
     },
+    "rough":
+    {
+      "TYPE":"MetallicRoughness",
+      "ALBEDO": {
+        "RGB":[0.98, 0.98, 0.98]
+      },
+      "ROUGHNESS": {
+        "VALUE": 0.8
+      },
+      "METALLIC": {
+        "VALUE": 1.0
+      }
+    },
     "specular":
     {
       "TYPE":"MetallicRoughness",
@@ -46,7 +59,7 @@
         "RGB":[0.98, 0.98, 0.98]
       },
       "ROUGHNESS": {
-        "VALUE": 0.3
+        "VALUE": 0.02
       },
       "METALLIC": {
         "VALUE": 1.0
@@ -57,7 +70,7 @@
   {
     "RES":[800,800],
     "FOVY":45.0,
-    "ITERATIONS":20000,
+    "ITERATIONS":8124,
     "DEPTH":8,
     "FILE":"cornell",
     "EYE":[0.0,5.0,10.5],
@@ -67,11 +80,15 @@
   "Objects":
   [
     {
-      "TYPE":"cube",
+      "TYPE":"gltf",
+      "PATH": "cube.gltf",
       "MATERIAL":"light",
       "TRANS":[0.0,10.0,0.0],
       "ROTAT":[0.0,0.0,0.0],
-      "SCALE":[3.0,0.3,3.0]
+      "SCALE":[0.05,0.03,0.05],
+      "SETTINGS": [
+        "FLAT_SHADE"
+      ]
     },
     {
       "TYPE":"cube",

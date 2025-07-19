@@ -1,6 +1,6 @@
 #pragma once
 
-#include "bvh.h"
+#include "geometry.h"
 #include "settings.h"
 #include <cuda_runtime.h>
 
@@ -40,19 +40,25 @@ float TriangleIntersectionTest(
 __host__ __device__
 float NaivePrimitiveIntersection(
     const Geometry &geom,
-    const MeshVertex *vertices,
-    const uint32_t *indices,
+    const SceneView &scene,
     const Ray &r,
     Intersection &intersection);
 
 #if USE_BVH
-__device__ float IntersectBVH(
+__device__ float IntersectBVHAny(
     const Geometry &geom,
-    const BVH::BVHNode *nodes,
-    const uint32_t *triangle_index_map,
-    const MeshVertex *vertex_array,
-    const uint32_t *index_array,
+    const SceneView &scene,
     const Ray &r,
-    Intersection &intersection);
+    Intersection &intersection,
+    float tmax = FLT_MAX
+);
+
+__device__ float IntersectBVHClosest(
+    const Geometry &geom,
+    const SceneView &scene,
+    const Ray &r,
+    Intersection &intersection,
+    float tmax = FLT_MAX
+);
 
 #endif

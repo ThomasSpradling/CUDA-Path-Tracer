@@ -1,21 +1,20 @@
 #pragma once
 
 #include "Intersections.h"
-#include "MathUtils.h"
-#include "texture.h"
-#include "utils.h"
-#include <glm/glm.hpp>
 #include <thrust/random.h>
-#include <variant>
+#include <glm/glm.hpp>
 
 #include "Materials/Lambertian.h"
 #include "Materials/MetallicRoughness.h"
 #include "Materials/PerfectDielectric.h"
 #include "Materials/PerfectMirror.h"
 #include "Materials/RoughDielectric.h"
+#include "exception.h"
 
 struct Light {
     glm::vec3 base_color;
+    float emittance;
+    int light_id = -1;
 };
 
 struct Material {
@@ -89,6 +88,58 @@ struct Material {
 
         if (type == Type::RoughDielectric) {
             return mat.rough_dielectric.Sample(intersection, w_out, rng);
+        }
+    }
+
+    __device__ glm::vec3 BSDF(const Intersection &intersection, const glm::vec3 &w_out, const glm::vec3 &w_in) {
+        if (type == Type::Light) {
+            return {};
+        }
+
+        if (type == Type::Lambertian) {
+            return mat.lambert.BSDF(intersection);
+        }
+
+        if (type == Type::Mirror) {
+            return {};
+        }
+
+        if (type == Type::Dielectric) {
+            return {};
+        }
+
+        if (type == Type::Metallic_Roughness) {
+            return mat.metallic_roughness.BSDF(intersection, w_out, w_in);
+        }
+
+        if (type == Type::RoughDielectric) {
+            return {};
+        }
+    }
+
+    __device__ float PDF(const Intersection &intersection, const glm::vec3 &w_out, const glm::vec3 &w_in) {
+        if (type == Type::Light) {
+            return {};
+        }
+
+        if (type == Type::Lambertian) {
+            return mat.lambert.PDF(intersection.normal, w_in);
+        }
+
+        if (type == Type::Mirror) {
+            return {};
+        }
+
+        if (type == Type::Dielectric) {
+            return {};
+        }
+
+        if (type == Type::Metallic_Roughness) {
+            return mat.metallic_roughness.PDF(intersection, w_out, w_in);
+        }
+
+        if (type == Type::RoughDielectric) {
+            return {};
         }
     }
 };

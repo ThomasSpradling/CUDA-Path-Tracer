@@ -7,3 +7,6 @@
 #define DEBUG_UV 0
 #define DEBUG_NORMAL 0
 #define DEBUG_DEPTH 0
+
+// multiple importance sampling
+#define USE_MIS 1

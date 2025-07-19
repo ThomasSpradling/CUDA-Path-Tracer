@@ -1,11 +1,7 @@
 #pragma once
 
-#include <cuda_runtime_api.h>
-#include <vulkan/vk_enum_string_helper.h>
 #include <sstream>
 #include <stdexcept>
-#include <cuda_runtime.h>
-#include <driver_types.h>
 
 class Exception : public std::runtime_error {
 public:
@@ -31,14 +27,3 @@ private:
 
 #define PT_ASSERT(expr, arg) \
     if (!(expr)) PT_ERROR("Assertion failed:\n\t " + std::string(#expr) + " -- " + std::string(arg));
-
-#define VK_CHECK(expr) \
-    if (VkResult result = (expr); result != VK_SUCCESS) { \
-        PT_ERROR("Call '" + std::string(#expr) + "' returned " + std::string(string_VkResult(result)) + "."); \
-    }
-
-#define CUDA_CHECK(expr) \
-    if (cudaError_t err = (expr); err != cudaSuccess) { \
-        PT_ERROR("Call '" + std::string(#expr) + "' returned " + std::string(cudaGetErrorString(err)) + "."); \
-    }
-

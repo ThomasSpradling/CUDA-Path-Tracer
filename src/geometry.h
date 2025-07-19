@@ -1,10 +1,13 @@
 #pragma once
 
+#include "samplers.h"
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/matrix_inverse.hpp>
 
 #include <cuda_runtime.h>
+
+class SceneView;
 
 struct Ray {
     glm::vec3 origin;
@@ -60,7 +63,7 @@ struct AABB {
 enum class GeometryType {
     Sphere,
     Cube,
-    GLTF_Primitive,
+    TriangleMesh,
 };
 
 struct TriangleMesh {
@@ -90,10 +93,14 @@ struct Geometry {
     glm::mat4 inv_transpose { 1.0f };
 
     TriangleMesh mesh;
-
+    
     int first_bvh_node = -1;
     int bvh_node_count = -1;
-
+    
     int first_tri_index = -1;
     int tri_index_count = -1;
+    
+    DiscreteSampler1DView triangle_sampler;
 };
+
+glm::vec3 SamplePoint(Geometry &geometry, SceneView &scene, float &pdf);

@@ -75,4 +75,16 @@ namespace Math {
         float base2 = base * base;
         return base2 * base2 * base;
     }
+
+    __host__ __device__ inline glm::vec3 Clamp(const glm::vec3 &v, const glm::vec3 &lo, const glm::vec3 &hi) {
+        return glm::vec3(
+            fminf(fmaxf(v.x, lo.x), hi.x),
+            fminf(fmaxf(v.y, lo.y), hi.y),
+            fminf(fmaxf(v.z, lo.z), hi.z)
+        );
+    }
+
+    __host__ __device__ inline float PowerHeuristic(float f_pdf, float g_pdf) {
+        return (f_pdf*f_pdf) / (f_pdf*f_pdf + g_pdf*g_pdf);
+    }
 }

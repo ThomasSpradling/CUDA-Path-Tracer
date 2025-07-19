@@ -1,4 +1,6 @@
 #include "platform.h"
+#include "CudaUtils.h"
+#include "VkUtils.h"
 #include "exception.h"
     
 cudaExternalMemory_t ImportCudaExternalMemory(VkDevice device, VkDeviceMemory memory, VkDeviceSize size) {

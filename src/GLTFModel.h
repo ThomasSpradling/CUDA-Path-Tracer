@@ -79,9 +79,7 @@ namespace GLTF {
         const std::vector<MeshVertex> &Vertices() const { return m_vertices; } 
         const std::vector<uint32_t> &Indices() const { return m_indices; } 
     private:
-        // std::vector<std::shared_ptr<SceneNode>> m_nodes;
         std::vector<std::shared_ptr<SceneNode>> m_root_nodes;
-        // std::vector<std::shared_ptr<Mesh>> m_meshes;
 
         const MeshSettings &m_settings;
 

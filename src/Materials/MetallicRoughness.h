@@ -78,4 +78,73 @@ struct MetallicRoughness {
         }
     }
 
+     __device__ glm::vec3 BSDF(
+        const Intersection &intersection,
+        const glm::vec3    &w_out,
+        const glm::vec3    &w_in
+    ) const {
+        glm::vec3 n     = intersection.normal;
+        float     cos_o = glm::dot(n, w_out);
+        float     cos_i = glm::dot(n, w_in);
+        if (cos_o <= 0.0f || cos_i <= 0.0f) return glm::vec3(0.0f);
+
+        glm::vec3 base     = albedo.Get(intersection.uv);
+        float     metallic = metallic_map.Get(intersection.uv);
+        float     rough    = glm::clamp(roughness_map.Get(intersection.uv), 0.01f, 1.0f);
+
+        // specular and diffuse factors
+        glm::vec3 F0 = glm::mix(glm::vec3(0.04f), base, metallic);
+        glm::vec3 kd = base * (1.0f - metallic);
+        float   reflectance = FresnelSchlick(cos_o, F0.r);
+
+        // half-vector for microfacet
+        glm::vec3 h = glm::normalize(w_out + w_in);
+        float     D = TrowbridgeReitz(n, h, rough);
+        float     G = SmithG(n, w_out, w_in, rough);
+        
+        // specular term
+        float denom_s = 4.0f * cos_o * cos_i;
+        glm::vec3 spec = F0 * (D * G / denom_s);
+
+        // diffuse (Lambert) with energy bias
+        float fd = (1.0f - reflectance);
+        glm::vec3 diff = kd * fd * c_INV_PI;
+
+        return spec + diff;
+    }
+
+    // PDF for sampling w_in given w_out
+    __device__ float PDF(
+        const Intersection &intersection,
+        const glm::vec3    &w_out,
+        const glm::vec3    &w_in
+    ) const {
+        glm::vec3 n     = intersection.normal;
+        float     cos_o = glm::dot(n, w_out);
+        float     cos_i = glm::dot(n, w_in);
+        if (cos_o <= 0.0f || cos_i <= 0.0f) return 0.0f;
+
+        glm::vec3 base     = albedo.Get(intersection.uv);
+        float     metallic = metallic_map.Get(intersection.uv);
+        float     rough    = glm::clamp(roughness_map.Get(intersection.uv), 0.01f, 1.0f);
+
+        glm::vec3 F0       = glm::mix(glm::vec3(0.04f), base, metallic);
+        float     reflectance = FresnelSchlick(cos_o, F0.r);
+
+        float l_s = reflectance;
+        float l_d = (1.0f - reflectance);
+        float spec_weight = l_s / (l_s + l_d);
+
+        // specular half-vector pdf
+        glm::vec3 h = glm::normalize(w_out + w_in);
+        float     D = TrowbridgeReitz(n, h, rough);
+        float     pdf_s = D * fabsf(glm::dot(n, h))
+                         / (4.0f * fabsf(glm::dot(w_out, h)));
+
+        // diffuse cosine hemisphere pdf
+        float pdf_d = fabsf(cos_i) * c_INV_PI;
+
+        return spec_weight * pdf_s + (1.0f - spec_weight) * pdf_d;
+    }
+
 };

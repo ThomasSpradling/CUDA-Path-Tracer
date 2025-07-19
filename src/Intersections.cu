@@ -1,5 +1,5 @@
 #include "Intersections.h"
-#include "utils.h"
+#include "SceneView.h"
 
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/norm.hpp>
@@ -155,8 +155,7 @@ float TriangleIntersectionTest(
 __host__ __device__
 float NaivePrimitiveIntersection(
     const Geometry & geom,
-    const MeshVertex *vertices,
-    const uint32_t *indices,
+    const SceneView &scene,
     const Ray &r,
     Intersection &intersection)
 {
@@ -171,13 +170,13 @@ float NaivePrimitiveIntersection(
     uint32_t start = geom.mesh.first_index;
     uint32_t end = start + geom.mesh.index_count;
     for (uint32_t i = start; i < end; i += 3) {
-        uint32_t vi0 = indices[i + 0];
-        uint32_t vi1 = indices[i + 1];
-        uint32_t vi2 = indices[i + 2];
+        uint32_t vi0 = scene.indices[i + 0];
+        uint32_t vi1 = scene.indices[i + 1];
+        uint32_t vi2 = scene.indices[i + 2];
 
-        const MeshVertex &v0 = vertices[vi0];
-        const MeshVertex &v1 = vertices[vi1];
-        const MeshVertex &v2 = vertices[vi2];
+        const MeshVertex &v0 = scene.vertices[vi0];
+        const MeshVertex &v1 = scene.vertices[vi1];
+        const MeshVertex &v2 = scene.vertices[vi2];
 
         glm::vec2 bary;
         float t_obj = TriangleIntersectionTest(ray, v0.position, v1.position, v2.position, bary);
@@ -291,15 +290,21 @@ __device__ inline void Push(StackEntry *s, uint32_t &top, uint32_t n, float t) {
     ++top;
 }
 
+enum BVHQueryMode { BVH_QUERY_CLOSEST, BVH_QUERY_ANY };
+
+template<BVHQueryMode Mode>
 __device__ float IntersectBVH(
     const Geometry &geom,
-    const BVH::BVHNode *nodes,
-    const uint32_t *tri_indices,
-    const MeshVertex *vertices,
-    const uint32_t *indices,
+    const SceneView &scene,
     const Ray &r,
-    Intersection &intersection)
+    Intersection &intersection,
+    float tmax)
 {
+    const BVH::BVHNode *bvh_nodes = scene.bvh_nodes;
+    const uint32_t *bvh_tri_indices = scene.bvh_tri_indices;
+    const uint32_t *indices = scene.indices;
+    const MeshVertex *vertices = scene.vertices;
+
     Ray ray;
     ray.origin = glm::vec3(geom.inv_transform * glm::vec4(r.origin, 1.0f));
     ray.direction = glm::normalize(glm::vec3(geom.inv_transform * glm::vec4(r.direction, 0.0f)));
@@ -315,15 +320,17 @@ __device__ float IntersectBVH(
 
     while (top > 0u) {
         StackEntry current_entry = stack[--top];
-        const BVH::BVHNode &node_data = nodes[current_entry.node];
+        const BVH::BVHNode &node_data = bvh_nodes[current_entry.node];
 
-        if (current_entry.t_near >= best_t_obj) {
-            continue;
+        if constexpr (Mode == BVHQueryMode::BVH_QUERY_CLOSEST) {
+            if (current_entry.t_near >= best_t_obj) {
+                continue;
+            }
         }
 
         if (node_data.IsLeaf()) {
             for (uint32_t tri_iter = 0u; tri_iter < node_data.tri_count; ++tri_iter) {
-                uint32_t local_tri_idx = tri_indices[geom.first_tri_index
+                uint32_t local_tri_idx = bvh_tri_indices[geom.first_tri_index
                                                           + node_data.first_tri
                                                           + tri_iter];
                 uint32_t base_index = geom.mesh.first_index + local_tri_idx * 3u;
@@ -346,30 +353,36 @@ __device__ float IntersectBVH(
                 glm::vec3 p_world = glm::vec3(geom.transform * glm::vec4(p_obj, 1.f));
                 float t_world = glm::dot(p_world - r.origin, r.direction);
 
-                if (t_world < best_t_world || best_t_world < 0.0f) {
-                    best_t_world = t_world;
-                    best_t_obj = t_obj;
-                    
-                    float w = 1.0f - bary.x - bary.y;
-                    glm::vec3 n0 = v0.normal, n1 = v1.normal, n2 = v2.normal;
-                    bool has_normals = (glm::length2(n0) > 1e-6f) && (glm::length2(n1) > 1e-6f) && (glm::length2(n2) > 1e-6f);
-
-                    if (has_normals) {
-                        best_normal = glm::normalize(w * n0 + bary.x * n1 + bary.y * n2);
-                    } else {
-                        best_normal = glm::normalize(glm::cross(
-                            v1.position - v0.position,
-                            v2.position - v0.position));
+                if constexpr (Mode == BVHQueryMode::BVH_QUERY_ANY) {
+                    if (t_world > 0.0f && t_world < tmax) {
+                        return t_world;  
                     }
-
-                    glm::vec2 uv0 = v0.uv0, uv1 = v1.uv0, uv2 = v2.uv0;
-                    bool has_uvs = (glm::length2(uv0) > 1e-6f) && (glm::length2(uv1) > 1e-6f) && (glm::length2(uv2) > 1e-6f);
-
-                    if (has_uvs) {
+                } else {
+                    if (t_world > 0.0f && t_world < best_t_world && t_world < tmax) {
+                        best_t_world = t_world;
+                        best_t_obj = t_obj;
+                        
                         float w = 1.0f - bary.x - bary.y;
-                        best_uv = w*uv0 + bary.x*uv1 + bary.y*uv2;
-                    } else {
-                        best_uv = bary;
+                        glm::vec3 n0 = v0.normal, n1 = v1.normal, n2 = v2.normal;
+                        bool has_normals = (glm::length2(n0) > 1e-6f) && (glm::length2(n1) > 1e-6f) && (glm::length2(n2) > 1e-6f);
+
+                        if (has_normals) {
+                            best_normal = glm::normalize(w * n0 + bary.x * n1 + bary.y * n2);
+                        } else {
+                            best_normal = glm::normalize(glm::cross(
+                                v1.position - v0.position,
+                                v2.position - v0.position));
+                        }
+
+                        glm::vec2 uv0 = v0.uv0, uv1 = v1.uv0, uv2 = v2.uv0;
+                        bool has_uvs = (glm::length2(uv0) > 1e-6f) && (glm::length2(uv1) > 1e-6f) && (glm::length2(uv2) > 1e-6f);
+
+                        if (has_uvs) {
+                            float w = 1.0f - bary.x - bary.y;
+                            best_uv = w*uv0 + bary.x*uv1 + bary.y*uv2;
+                        } else {
+                            best_uv = bary;
+                        }
                     }
                 }
             }
@@ -381,8 +394,8 @@ __device__ float IntersectBVH(
             float t_near_right = 0.0f;
             float t_limit = best_t_obj;
 
-            bool hit_left  = IntersectAABB(ray, nodes[left_index].bounds,  t_limit, t_near_left);
-            bool hit_right = IntersectAABB(ray, nodes[right_index].bounds, t_limit, t_near_right);
+            bool hit_left  = IntersectAABB(ray, bvh_nodes[left_index].bounds,  t_limit, t_near_left);
+            bool hit_right = IntersectAABB(ray, bvh_nodes[right_index].bounds, t_limit, t_near_right);
 
             if (hit_left && hit_right) {
                 if (t_near_left < t_near_right) {
@@ -400,6 +413,10 @@ __device__ float IntersectBVH(
         }
     }
 
+    if constexpr (Mode == BVH_QUERY_ANY) {
+        return -1.0f;
+    }
+
     if (best_t_world < 1e-5 || best_t_world == FLT_MAX) {
         intersection.t = -1;
         return -1.0f;
@@ -414,6 +431,26 @@ __device__ float IntersectBVH(
     intersection.t = best_t_world;
 
     return best_t_world;
+}
+
+__device__ float IntersectBVHAny(
+    const Geometry &geom,
+    const SceneView &scene,
+    const Ray &r,
+    Intersection &intersection,
+    float tmax
+) {
+    return IntersectBVH<BVH_QUERY_ANY>(geom, scene, r, intersection, tmax);
+}
+
+__device__ float IntersectBVHClosest(
+    const Geometry &geom,
+    const SceneView &scene,
+    const Ray &r,
+    Intersection &intersection,
+    float tmax
+) {
+    return IntersectBVH<BVH_QUERY_CLOSEST>(geom, scene, r, intersection, tmax);
 }
 
 #endif

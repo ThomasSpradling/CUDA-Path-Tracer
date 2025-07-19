@@ -2,10 +2,7 @@
 
 #include "Image.h"
 #include "exception.h"
-#include "image.h"
-#include <iostream>
 #include <string>
-#include <texture_indirect_functions.h>
 #include <vector>
 
 #include <cuda_runtime.h>

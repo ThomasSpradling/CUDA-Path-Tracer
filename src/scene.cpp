@@ -1,10 +1,14 @@
-#include "scene.h"
+#include "Scene.h"
+#include "CudaUtils.h"
+#include "GLTFModel.h"
+#include "Light.h"
 #include "Materials/Lambertian.h"
 #include "Materials/RoughDielectric.h"
 #include "Texture.h"
 #include "exception.h"
 #include "glm/gtc/matrix_inverse.hpp"
 #include "material.h"
+#include "samplers.h"
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -73,6 +77,7 @@ void Scene::LoadFromJSON(const std::string &filename) {
 
             material.mat.light = Light{
                 .base_color = glm::vec3(color[0], color[1], color[2]),
+                .emittance = value["EMITTANCE"].is_number() ? value["EMITTANCE"].get<float>() : 1.0f,
             };
 
         } else if (value["TYPE"] == "Dielectric") {
@@ -137,7 +142,7 @@ void Scene::LoadFromJSON(const std::string &filename) {
         } else if (type == "sphere") {
             geometry.type = GeometryType::Sphere;
         } else if (type == "gltf") {
-            geometry.type = GeometryType::GLTF_Primitive;
+            geometry.type = GeometryType::TriangleMesh;
         } else {
             PT_ERROR("Invalid geometry type!");
         }
@@ -156,7 +161,7 @@ void Scene::LoadFromJSON(const std::string &filename) {
                 }
 
                 if (setting == "FLAT_SHADE") {
-                    if (geometry.type != GeometryType::GLTF_Primitive) {
+                    if (geometry.type != GeometryType::TriangleMesh) {
                         std::cerr << "Scene Warning: Setting 'FLAT_SHADE' is incompatible with object of type '" << type << "'" << std::endl;
                     }
 
@@ -185,7 +190,7 @@ void Scene::LoadFromJSON(const std::string &filename) {
         geometry.inv_transform = glm::inverse(geometry.transform);
         geometry.inv_transpose = glm::inverseTranspose(geometry.transform);
 
-        if (geometry.type != GeometryType::GLTF_Primitive) {
+        if (geometry.type != GeometryType::TriangleMesh) {
             m_geometry.push_back(geometry);
         } else {
             GLTF::GLTFModel model(obj_settings);
@@ -268,5 +273,126 @@ void Scene::LoadFromJSON(const std::string &filename) {
     camera.default_params.position = camera.position;
     camera.default_params.look_at = camera.look_at;
 
+    InitGeometry();
+    UploadToGPU();
+
     std::cout << "Finished loading scene!\n";
+}
+
+void Scene::UploadToGPU() {
+    m_view.geometry_count = CopyToDevice(m_view.geometries, m_geometry);
+    m_view.material_count = CopyToDevice(m_view.materials, m_materials);
+    m_view.vertex_count = CopyToDevice(m_view.vertices, m_vertices);
+    m_view.index_count = CopyToDevice(m_view.indices, m_indices);
+
+    m_view.bvh_node_count = CopyToDevice(m_view.bvh_nodes, m_bvh_nodes);
+    m_view.bvh_indices_count = CopyToDevice(m_view.bvh_tri_indices, m_bvh_tri_indices);
+    m_view.light_count = CopyToDevice(m_view.lights, m_area_lights);
+}
+
+void Scene::InitGeometry() {
+    int geometry_count = m_geometry.size();
+    float scene_light_power = 0.0f;
+    
+    for (int i = 0; i < geometry_count; ++i) {
+        auto &geom = m_geometry[i];
+        if (m_materials[geom.material_id].type == Material::Type::Light) {
+            float emittance = m_materials[geom.material_id].mat.light.emittance;
+            switch (geom.type) {
+                case GeometryType::TriangleMesh: {
+                    float total_area = 0.0f;
+                    std::vector<float> areas;
+                    areas.reserve(geom.mesh.index_count / 3);
+                    for (uint32_t j = 0; j < geom.mesh.index_count; j += 3) {
+                        uint32_t j0 = m_indices[geom.mesh.first_index + j];
+                        uint32_t j1 = m_indices[geom.mesh.first_index + j+1];
+                        uint32_t j2 = m_indices[geom.mesh.first_index + j+2];
+                        glm::vec3 p0 = m_vertices[j0].position;
+                        glm::vec3 p1 = m_vertices[j1].position;
+                        glm::vec3 p2 = m_vertices[j2].position;
+
+                        glm::vec3 w0 = glm::vec3(geom.transform * glm::vec4(p0,1.0f));
+                        glm::vec3 w1 = glm::vec3(geom.transform * glm::vec4(p1,1.0f));
+                        glm::vec3 w2 = glm::vec3(geom.transform * glm::vec4(p2,1.0f));
+
+                        glm::vec3 e0 = w1 - w0;
+                        glm::vec3 e1 = w2 - w0;
+                        float tri_area = 0.5f * glm::length(glm::cross(e0, e1));
+
+                        total_area += tri_area;
+                        areas.push_back(tri_area);
+                    }
+                    DiscreteSampler1D triangle_sampler(areas);
+                    m_geometry[i].triangle_sampler = triangle_sampler.View();
+                    
+                    AreaLight light {
+                        .geometry_id = i,
+                        .power = total_area * emittance * c_PI,
+                        .area = total_area,
+                    };
+                    scene_light_power += light.power;
+                    m_materials[geom.material_id].mat.light.light_id = m_area_lights.size();
+                    m_area_lights.push_back(light);
+                    break;
+                }
+                case GeometryType::Sphere: {
+                    AreaLight light {
+                        .geometry_id = i,
+                        .power = c_PI * emittance * c_PI,
+                        .area = c_PI,
+                    };
+                    scene_light_power += light.power;
+                    m_materials[geom.material_id].mat.light.light_id = m_area_lights.size();
+                    m_area_lights.push_back(light);
+                    break;
+                }
+                case GeometryType::Cube: {
+                    AreaLight light {
+                        .geometry_id = i,
+                        .power = 6.0f * emittance * c_PI,
+                        .area = 6.0f,
+                    };
+                    scene_light_power += light.power;
+                    m_materials[geom.material_id].mat.light.light_id = m_area_lights.size();
+                    m_area_lights.push_back(light);
+                    break;
+                }
+            }
+        }
+
+        if (geom.type != GeometryType::TriangleMesh)
+            continue;
+        
+        BVH::BVH bvh(geom, m_vertices, m_indices);
+        bvh.Build();
+
+        const uint32_t base_node = static_cast<uint32_t>(m_bvh_nodes.size());
+        const uint32_t base_tri = static_cast<uint32_t>(m_bvh_tri_indices.size());
+
+        for (const BVH::BVHNode &src : bvh.Nodes()) {
+            BVH::BVHNode n = src;
+
+            if (n.left_child != UINT32_MAX)
+                n.left_child += base_node;
+
+            m_bvh_nodes.push_back(n);
+        }
+
+        m_bvh_tri_indices.insert(m_bvh_tri_indices.end(), bvh.TriIndices().begin(), bvh.TriIndices().end());
+
+        geom.first_bvh_node = base_node;
+        geom.bvh_node_count = bvh.Nodes().size();
+
+        geom.first_tri_index = base_tri;
+        geom.tri_index_count = bvh.TriIndices().size();
+    }
+
+    m_view.total_light_power = scene_light_power;
+
+    std::vector<float> powers(m_area_lights.size());
+    for (uint32_t i = 0; i < m_area_lights.size(); ++i) {
+        powers[i] = m_area_lights[i].power;
+    }
+    DiscreteSampler1D light_sampler(powers);
+    m_view.light_sampler = light_sampler.View();
 }

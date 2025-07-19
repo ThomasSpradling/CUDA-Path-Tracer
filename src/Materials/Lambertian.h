@@ -21,6 +21,10 @@ struct Lambertian {
         return sample;
     }
 
+    __device__ glm::vec3 BSDF(const Intersection &intersection) {
+        return albedo.Get(intersection.uv) * c_INV_PI;
+    }
+
     __device__ float PDF(const glm::vec3 &normal, const glm::vec3 &w_in) {
         return fmaxf(0.0f, glm::dot(normal, w_in)) * c_INV_PI;
     }

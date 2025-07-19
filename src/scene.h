@@ -10,9 +10,10 @@
 #include "geometry.h"
 
 #include <cuda_runtime.h>
-#include "GLTFModel.h"
-#include "json.hpp"
+#include <nlohmann/json.hpp>
 #include "material.h"
+#include "Samplers.h"
+#include "SceneView.h"
 
 // struct Material {
 //     glm::vec3 color;
@@ -61,6 +62,9 @@ struct PathSegment {
     int pixel_index;
     int remaining_bounces;
 
+    glm::vec3 last_pos;
+    float last_pdf;
+
     bool hit = false;
 };
 
@@ -83,19 +87,28 @@ public:
     
     int IndexCount() const { return m_indices.size(); }
     const std::vector<uint32_t> &Indices() const { return m_indices; }
+
+    inline const SceneView &View() const { return m_view; }
 private:
+    std::vector<AreaLight> m_area_lights;
     std::vector<Geometry> m_geometry;
     std::vector<Material> m_materials;
     RenderState m_state;
 
-    std::vector<TriangleMesh> m_mesh_buffer;
     std::vector<MeshVertex> m_vertices;
     std::vector<uint32_t> m_indices;
 
+    std::vector<BVH::BVHNode> m_bvh_nodes;
+    std::vector<uint32_t> m_bvh_tri_indices;
+
+    SceneView m_view;
     fs::path m_scene_dir;
 private:
     void LoadFromJSON(const std::string &filename);
     Texture<glm::vec3> LoadTexture3D(const nlohmann::json &parsed_texture);
+
+    void InitGeometry();
+    void UploadToGPU();
 
     template<typename T>
     void LoadTexture(Texture<T> &texture, const nlohmann::json &parsed_texture) {

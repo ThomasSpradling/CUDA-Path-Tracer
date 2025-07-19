@@ -29,8 +29,6 @@ private:
 
     const VkExtent2D &m_extent;
     glm::vec3 *md_image = nullptr;
-    Geometry *md_geometries = nullptr;
-    Material *md_materials = nullptr;
 
     PathSegment *md_paths = nullptr;
     thrust::device_ptr<PathSegment> m_paths_thrust;
@@ -45,17 +43,4 @@ private:
 
     Intersection *md_intersections = nullptr;
     thrust::device_ptr<Intersection> m_intersection_thrust;
-
-    MeshVertex *md_vertices;
-    uint32_t *md_indices;
-
-#if USE_BVH
-    std::vector<BVH::BVHNode> m_bvh_nodes;
-    BVH::BVHNode *md_bvh_nodes;
-
-    std::vector<uint32_t> m_bvh_tri_indices;
-    uint32_t *md_bvh_tri_indices;
-#endif
-private:
-
 };
