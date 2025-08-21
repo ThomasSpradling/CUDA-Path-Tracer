@@ -1,398 +1,687 @@
-#include "Scene.h"
-#include "CudaUtils.h"
-#include "GLTFModel.h"
-#include "Light.h"
-#include "Materials/Lambertian.h"
-#include "Materials/RoughDielectric.h"
-#include "Texture.h"
-#include "exception.h"
-#include "glm/gtc/matrix_inverse.hpp"
-#include "material.h"
-#include "samplers.h"
-#include <cstdint>
-#include <filesystem>
+#include "scene.h"
+#include "kernel/integrators/integrator.h"
+#include "math/constants.h"
+#include "math/geometry.h"
+#include "mesh/wavefront_obj.h"
+#include "utils/cuda_utils.h"
+#include "utils/utils.h"
+#include "utils/exception.h"
+#include "math/transform.h"
 #include <fstream>
 #include <iostream>
-#include <new>
-#include <nlohmann/json.hpp>
+#include <glm/gtc/matrix_inverse.hpp>
+#include <memory>
 #include <string>
 #include <unordered_map>
 
-using json = nlohmann::json;
-
-// class Scene {
-// public:
-//     Scene(const std::string &filename);
-//     ~Scene();
-// private:
-//     std::vector<Geometry> m_geometry;
-//     std::vector<Material> m_materials;
-//     RenderState m_state;
-// private:
-//     void LoadFromJSON(const std::string &name);
-// };
-
 Scene::Scene(const std::string &filename) {
-    std::cout << "Reading scene from " << filename << std::endl;
-    std::string ext = fs::path(filename).extension().string();
-    PT_ASSERT(ext == ".json", std::format("Couldn't read from file '{}'.", filename));
-
-    LoadFromJSON(filename);
+    LoadScene(filename);
+    std::memset(&m_device_scene, 0, sizeof(DeviceScene));
 }
 
-void Scene::LoadFromJSON(const std::string &filename) {
+Scene::~Scene() {
+    m_texture_pool->FreeDevice(m_device_scene);
+
+    {
+        uint32_t n = m_device_scene.triangle_sampler_count;
+        std::vector<DeviceDiscreteSampler1D> triangle_samplers(n);
+        cudaMemcpy(triangle_samplers.data(), m_device_scene.triangle_samplers, n * sizeof(DeviceDiscreteSampler1D), cudaMemcpyDeviceToHost);
+
+        for (uint32_t i = 0; i < n; ++i) {
+            m_triangle_samplers[i].FreeDevice(triangle_samplers[i]);
+        }
+        cudaFree(m_device_scene.triangle_samplers);
+    }
+
+    DeviceDiscreteSampler1D light_sampler;
+    cudaMemcpy(&light_sampler, m_device_scene.light_sampler, sizeof(DeviceDiscreteSampler1D), cudaMemcpyDeviceToHost);
+    m_light_sampler.FreeDevice(light_sampler);
+
+    cudaFree(m_device_scene.positions);
+    cudaFree(m_device_scene.normals);
+    cudaFree(m_device_scene.uvs);
+    cudaFree(m_device_scene.indices);
+    cudaFree(m_device_scene.geometries);
+
+    cudaFree(m_device_scene.materials);
+    cudaFree(m_device_scene.lights);
+
+    m_bvh->FreeDevice(m_device_scene);
+}
+
+bool Scene::UpdateDevice() {
+    bool old_dirty = m_dirty;
+    if (m_dirty) {
+        // -- vertex data / geometries --------
+        m_device_scene.vertex_count = CopyToDevice(m_device_scene.positions, m_positions);
+        CopyToDevice(m_device_scene.normals, m_normals);
+        CopyToDevice(m_device_scene.uvs, m_texcoords);
+
+        m_device_scene.index_count = CopyToDevice(m_device_scene.indices, m_indices);
+
+        m_device_scene.geometry_count = CopyToDevice(m_device_scene.geometries, m_geometries);
+        m_device_scene.max_depth = m_max_depth;
+
+        // Update discrete samplers
+        m_device_scene.triangle_sampler_count = m_triangle_samplers.size();
+        if (m_device_scene.triangle_sampler_count > 0) {
+            std::vector<DeviceDiscreteSampler1D> triangle_samplers(m_triangle_samplers.size());
+            for (int i = 0; i < m_triangle_samplers.size(); ++i) {
+                m_triangle_samplers[i].UpdateDevice(triangle_samplers[i]);
+            }
+
+            CopyToDevice(m_device_scene.triangle_samplers, triangle_samplers);
+        }
+        
+        // -- materials --------
+        m_device_scene.material_count = CopyToDevice(m_device_scene.materials, m_materials);
+        
+        // -- lights --------
+        m_device_scene.light_count = CopyToDevice(m_device_scene.lights, m_lights);
+        m_device_scene.total_light_power = m_total_light_power;
+
+        DeviceDiscreteSampler1D light_sampler;
+        m_light_sampler.UpdateDevice(light_sampler);
+        CUDA_CHECK(cudaMalloc((void **) &m_device_scene.light_sampler, sizeof(DeviceDiscreteSampler1D)));
+        CUDA_CHECK(cudaMemcpy(m_device_scene.light_sampler, &light_sampler, sizeof(DeviceDiscreteSampler1D), cudaMemcpyHostToDevice));
+
+        m_dirty = false;
+    }
+    
+    m_texture_pool->UpdateDevice(m_device_scene);
+    m_bvh->UpdateDevice(m_device_scene);
+    m_camera->UpdateDevice(m_device_scene);
+
+    return old_dirty;
+}
+
+IntegratorType _GetIntegratorType(const std::string &str) {
+    std::string integrator = Utils::ToLowercase(str);
+    if (integrator == "path") {
+        return IntegratorType::Path;
+    }
+
+    std::cout << std::format("\tInvalid integrator type '{}'. Defaulting to 'path'.", integrator) << std::endl;
+    return IntegratorType::Path;
+}
+
+CameraType _GetCameraType(const std::string &str) {
+    std::string camera = Utils::ToLowercase(str);
+    if (camera == "pinhole") {
+        return CameraType::Pinhole;
+    } else if (camera == "thinlens") {
+        return CameraType::ThinLens;
+    }
+
+    std::cout << std::format("\tInvalid camera type '{}'. Defaulting to 'pinhole'.", camera) << std::endl;
+    return CameraType::Pinhole;
+}
+
+SamplerType _GetSamplerType(const std::string &str) {
+    std::string sampler = Utils::ToLowercase(str);
+    if (sampler == "independent") {
+        return SamplerType::Independent;
+    } else if (sampler == "sobol") {
+        return SamplerType::Sobol;
+    }
+
+    std::cout << std::format("\tInvalid sampler type '{}'. Defaulting to 'independent'.", sampler) << std::endl;
+    return SamplerType::Independent;
+}
+
+ReconstructionFilterType _GetFilterType(const std::string &str) {
+    std::string filter = Utils::ToLowercase(str);
+    if (filter == "box") {
+        return ReconstructionFilterType::Box;
+    } else if (filter == "gaussian") {
+        return ReconstructionFilterType::Gaussian;
+    }
+
+    std::cout << std::format("\tInvalid filter type '{}'. Defaulting to 'box'.", filter) << std::endl;
+    return ReconstructionFilterType::Box;
+}
+
+ColorSpace _GetColorSpaceType(const std::string &str) {
+    std::string colorspace = Utils::ToLowercase(str);
+    if (colorspace == "rgb") {
+        return ColorSpace::RGB;
+    } else if (colorspace == "xyz") {
+        return ColorSpace::XYZ;
+    }
+
+    std::cout << std::format("\tInvalid color space '{}'. Defaulting to 'rgb'.", colorspace) << std::endl;
+    return ColorSpace::RGB;
+}
+
+void Scene::ParseIntegrator(const json &data) {
+    const IntegratorType default_integrator = IntegratorType::Path;
+    const int default_depth = 4;
+    const int default_iterations = 1000;
+
+    if (data.contains("integrator")) {
+        const auto &integrator = data["integrator"];
+        m_integrator = _GetIntegratorType(integrator.value("TYPE", "path"));
+        m_max_depth = integrator.value("DEPTH", default_depth);
+        m_max_iterations = integrator.value("ITERATIONS", default_iterations);
+    } else {
+        std::cout << "\tNo integrator chosen. Choosing a default." << std::endl;
+
+        m_integrator = default_integrator;
+        m_max_depth = default_depth;
+        m_max_iterations = default_iterations;
+    }
+}
+
+void Scene::ParseCamera(const json &data) {
+    const float default_fovy = 45.0f;
+    const glm::vec3 default_up = glm::vec3(0.0f, 1.0f, 0.0f);
+    const glm::vec3 default_eye = glm::vec3(0.0f);
+    const glm::vec3 default_look = glm::vec3(0.0f, 0.0f, -1.0f);
+
+    const float default_near = 0.1f;
+    const float default_far = 100.0f;
+
+    const SamplerType default_sampler = SamplerType::Independent;
+    const ReconstructionFilterType default_filter = ReconstructionFilterType::Box;
+    const ColorSpace film_format = ColorSpace::RGB;
+
+    if (!data.contains("camera")) {
+        std::cerr << "Failed to parse scene: Missing camera!" << std::endl;
+        return;
+    }
+
+    m_camera = std::make_unique<Camera>();
+
+    const auto &camera = data["camera"];
+    m_camera->m_type = _GetCameraType(camera.value("TYPE", "pinhole"));
+    m_camera->m_default_params.fovy = camera.value("FOVY", default_fovy);
+    m_camera->m_default_params.up = Utils::GetOrDefault<glm::vec3>(camera, "UP", default_up);
+    m_camera->m_default_params.position = Utils::GetOrDefault<glm::vec3>(camera, "EYE", default_eye);
+    m_camera->m_default_params.look_at = Utils::GetOrDefault<glm::vec3>(camera, "LOOKAT", default_look);
+    m_camera->m_near = Utils::GetOrDefault<float>(camera, "NEAR", default_near);
+    m_camera->m_far = Utils::GetOrDefault<float>(camera, "FAR", default_far);
+    
+
+    if (camera.contains("sampler")) {
+        const auto &sampler = camera["sampler"];
+        m_sampler = _GetSamplerType(sampler.value("TYPE", "independent"));
+    } else {
+        m_sampler = default_sampler;
+    }
+
+    if (camera.contains("reconstruction_filter")) {
+        const auto &filter = camera["reconstruction_filter"];
+        m_camera->m_film.m_reconstruction_filter = _GetFilterType(filter.value("TYPE", "box"));
+    } else {
+        m_camera->m_film.m_reconstruction_filter = default_filter;
+    }
+
+    if (!camera.contains("film")) {
+        std::cerr << "Failed to parse scene: Missing camera film!" << std::endl;
+        return;
+    }
+
+    const auto &film = camera["film"];
+    const int width = film["WIDTH"];
+    const int height = film["HEIGHT"];
+
+    m_camera->m_film.m_resolution = { width, height };
+    m_camera->m_film.m_color_space = _GetColorSpaceType(film.value("COLOR_SPACE", "rgb"));
+
+    m_camera->ResetDefaults();
+
+}
+
+void Scene::InitDefaults() {
+    {
+        Texture<float> texture;
+        texture.type = TextureType::Constant;
+        texture.constant.value = 0.98f;
+        
+        m_texture_pool->textures1.push_back(texture);
+    }
+
+    {
+        Texture<glm::vec3> texture;
+        texture.type = TextureType::Constant;
+        texture.constant.value = glm::vec3(0.98f);
+        
+        m_texture_pool->textures3.push_back(texture);
+    }
+
+    {
+        // default material uses default texture
+        Material default_material;
+        default_material.type = Material::Type::Lambertian;
+        default_material.lambertian.albedo_texture = 0;
+
+        m_materials.push_back(default_material);
+    }
+}
+
+bool Scene::ParseMaterial(const json &material) {
+    if (!material.contains("TYPE")) {
+        std::cerr << "Failed to parse scene: Material must contain a type!";
+        return 1;
+    }
+
+    Material mat;
+
+    // -- Emitting material --------
+    if (Utils::ToLowercase(material["TYPE"]) == "emitting") {
+        mat.type = Material::Type::Emissive;
+
+        if (material.contains("RADIANCE")) {
+            const auto &radiance = material["RADIANCE"];
+            mat.emissive.color_texture = ParseTexture<glm::vec3>(radiance);
+            mat.emissive.emittance = radiance.value("EMITTANCE", 1.0f);
+        } else {
+            mat.emissive.color_texture = 0;
+            mat.emissive.emittance = 1.0f;
+        }
+    }
+
+    // -- Diffuse material --------
+    if (Utils::ToLowercase(material["TYPE"]) == "diffuse" || Utils::ToLowercase(material["TYPE"]) == "lambertian") {
+        mat.type = Material::Type::Lambertian;
+        mat.lambertian.albedo_texture = LoadTextureOrZero<glm::vec3>(material, "ALBEDO", 0, true);
+    }
+
+    // -- Mirror material --------
+    if (Utils::ToLowercase(material["TYPE"]) == "mirror") {
+        mat.type = Material::Type::Mirror;
+        mat.mirror.albedo_texture = LoadTextureOrZero<glm::vec3>(material, "ALBEDO", 0, true);
+    }
+
+    // -- Dielectric material --------
+    if (Utils::ToLowercase(material["TYPE"]) == "dielectric") {
+        mat.type = Material::Type::Dielectric;
+        
+        if (!material.contains("IOR") && !material.contains("INDEX_OF_REFRACTION")) {
+            std::cerr << "Warning: Dielectric materials must have assigned an index of refraction" << std::endl;
+        } else {
+            float ior;
+            if (material.contains("INDEX_OF_REFRACTION")) {
+                ior = material["INDEX_OF_REFRACTION"];
+            } else {
+                ior = material["IOR"];
+            }
+
+            mat.dielectric.albedo_texture = LoadTextureOrZero<glm::vec3>(material, "ALBEDO", 0, true);
+            mat.dielectric.ior = ior;
+        }
+        
+    }
+
+    // -- Metallic roughness material --------
+    if (Utils::ToLowercase(material["TYPE"]) == "metallic_roughness") {
+        mat.type = Material::Type::MetallicRoughness;
+        mat.metallic_roughness.albedo_texture = LoadTextureOrZero<glm::vec3>(material, "ALBEDO", 0, true);
+        uint32_t roughness_texture = LoadTextureOrZero<float>(material, "ROUGHNESS");
+        uint32_t metallic_texture = LoadTextureOrZero<float>(material, "METALLIC");
+
+        if (metallic_texture == 0 && roughness_texture == 0 && material.contains("ORM")) {
+            roughness_texture = LoadTextureOrZero<float>(material, "ORM", 1);
+            metallic_texture = LoadTextureOrZero<float>(material, "ORM", 2);
+        }
+
+        mat.metallic_roughness.roughness_texture = roughness_texture;
+        mat.metallic_roughness.metallic_texture = metallic_texture;
+    }
+
+    m_materials.push_back(mat);
+
+    return 0;
+}
+
+std::unordered_map<std::string, int> Scene::ParseMaterials(const json &data) {
+    std::unordered_map<std::string, int> material_ids {};
+
+    if (data.contains("materials")) {
+        for (const auto &[key, value] : data["materials"].items()) {
+            if (material_ids.contains(key)) {
+                std::cerr << std::format("Scene Error: Found multiple materials with name '{}'.", key) << std::endl;
+                continue;
+            }
+
+            material_ids[key] = m_materials.size();
+            bool err = ParseMaterial(value);
+            if (err) {
+                return {};
+            }
+        }
+    }
+
+    return material_ids;
+}
+
+std::vector<GeometryInstance> Scene::ParseObject(const json &parsed_object, const std::unordered_map<std::string, int> &material_ids) {
+    if (!parsed_object.contains("TYPE")) {
+        std::cout << "Scene Error: Every object in a scene must have a type!" << std::endl;
+        return {};
+    }
+
+    // -- Wavefront OBJ format --------
+    if (Utils::ToLowercase(parsed_object["TYPE"]) == "obj") {
+        PT_ASSERT(parsed_object.contains("PATH"), "Scene Error: Every obj mesh must have a path to load from.");
+
+        GeometryInstance instance;
+
+        std::string raw_path = parsed_object["PATH"].get<std::string>();
+        fs::path candidate(raw_path);
+        fs::path file = candidate.is_absolute()
+            ? candidate
+            : (m_scene_dir / candidate);
+
+        MeshSettings settings;
+        settings.face_normals = parsed_object.value("FACE_NORMALS", false);
+        settings.invert_normals = parsed_object.value("INVERT_NORMALS", false);
+
+        Mesh mesh = LoadWavefrontObjMesh(file, settings);
+        if (mesh.indices.size() == 0 || mesh.positions.size() == 0) {
+            std::cerr << "Skipping object since it has zero vertices!" << std::endl;
+            return {};
+        }
+        
+        // Update indices and vertices
+        {
+            uint32_t base_vertex = static_cast<uint32_t>(m_positions.size());
+            instance.triangle_mesh.first_index = m_indices.size();
+            instance.triangle_mesh.index_count = mesh.indices.size();
+            instance.triangle_mesh.vertex_count = mesh.positions.size();
+
+            m_indices.reserve(m_indices.size() + mesh.indices.size());
+            for (auto idx : mesh.indices) {
+                m_indices.push_back(base_vertex + idx);
+            }
+
+            m_positions.insert(m_positions.end(), mesh.positions.begin(), mesh.positions.end());
+            m_texcoords.insert(m_texcoords.end(), mesh.texcoords.begin(), mesh.texcoords.end());
+            m_normals.insert(m_normals.end(), mesh.normals.begin(), mesh.normals.end());
+        }
+
+        // We do not use the MTL files with the object, so if users don't specify the material,
+        // we use default
+        if (!parsed_object.contains("MATERIAL") || !material_ids.contains(parsed_object["MATERIAL"])) {
+            instance.material_id = 0;
+        } else {
+            instance.material_id = material_ids.at(parsed_object["MATERIAL"]);
+        }
+
+        glm::vec3 translate = Utils::GetOrDefault(parsed_object, "TRANS", glm::vec3(0.0f));
+        glm::vec3 rotate = Utils::GetOrDefault(parsed_object, "ROTAT", glm::vec3(0.0f));
+        glm::vec3 scale = Utils::GetOrDefault(parsed_object, "SCALE", glm::vec3(1.0f));
+
+        instance.transform = Math::GetTransformMatrix(translate, rotate, scale);
+        instance.inv_transform = glm::inverse(instance.transform);
+        instance.inv_transpose = glm::inverseTranspose(instance.transform);
+
+        instance.blas_index = m_current_blas_index++;
+
+        // m_geometries.push_back(instance);
+        return { instance };
+    }
+
+    // -- glTF format --------
+    if (Utils::ToLowercase(parsed_object["TYPE"]) == "gltf") {
+        PT_ASSERT(parsed_object.contains("PATH"), "Scene Error: Every gltf mesh must have a path to load from.");
+
+        std::string raw_path = parsed_object["PATH"].get<std::string>();
+        fs::path candidate(raw_path);
+        fs::path file = candidate.is_absolute()
+            ? candidate
+            : (m_scene_dir / candidate);
+
+        MeshSettings settings;
+        settings.face_normals = parsed_object.value("FACE_NORMALS", false);
+        settings.invert_normals = parsed_object.value("INVERT_NORMALS", false);
+
+        GLTF::GLTFModel model(settings, *m_texture_pool);
+        model.LoadGLTF(file.string());
+
+        const Mesh &mesh = model.AggregateMesh();
+        if (mesh.indices.size() == 0 || mesh.positions.size() == 0) {
+            std::cerr << "Skipping glTF object since it has zero vertices!" << std::endl;
+            return {};
+        }
+
+        uint32_t base_vertex = static_cast<uint32_t>(m_positions.size());
+        uint32_t base_index = static_cast<uint32_t>(m_indices.size());
+
+        // Update indices and vertices
+
+        m_indices.reserve(m_indices.size() + mesh.indices.size());
+        for (auto idx : mesh.indices) {
+            m_indices.push_back(base_vertex + idx);
+        }
+        m_positions.insert(m_positions.end(), mesh.positions.begin(), mesh.positions.end());
+        m_texcoords.insert(m_texcoords.end(), mesh.texcoords.begin(), mesh.texcoords.end());
+        m_normals.insert(m_normals.end(), mesh.normals.begin(), mesh.normals.end());
+
+        int base_material = m_materials.size();
+        m_materials.insert(m_materials.end(), model.Materials().begin(), model.Materials().end());
+
+        glm::vec3 translate = Utils::GetOrDefault(parsed_object, "TRANS", glm::vec3(0.0f));
+        glm::vec3 rotate = Utils::GetOrDefault(parsed_object, "ROTAT", glm::vec3(0.0f));
+        glm::vec3 scale = Utils::GetOrDefault(parsed_object, "SCALE", glm::vec3(1.0f));
+        glm::mat4 instance_transform = Math::GetTransformMatrix(translate, rotate, scale);
+
+        std::vector<GeometryInstance> geometries {};
+
+        std::unordered_map<uint64_t, int> blas_indices;
+        model.ForEachNode([&](const GLTF::SceneNode &node) {
+            // Technically bad naming: `world_transform` here just means glTF model-space
+            // as opposed to glTF primitive-space
+            glm::mat4 world_transform = instance_transform * node.world_transform;
+
+            if (!node.mesh) return;
+
+            for (int i = 0; i < node.mesh->primitives.size(); ++i) {
+                const GLTF::Primitive &primitive = node.mesh->primitives[i];
+
+                GeometryInstance instance;
+                instance.triangle_mesh.first_index = base_index + primitive.first_index;
+                instance.triangle_mesh.index_count  = primitive.index_count;
+                instance.triangle_mesh.vertex_count = primitive.vertex_count;
+
+                // Scene-defined materials takes precedence
+                if (!parsed_object.contains("MATERIAL") ||
+                    !material_ids.contains(parsed_object["MATERIAL"])) {
+                    instance.material_id = base_material + primitive.material_id;
+                } else {
+                    instance.material_id =
+                        material_ids.at(parsed_object["MATERIAL"]);
+                }
+
+                instance.transform = world_transform;
+                instance.inv_transform = glm::inverse(world_transform);
+                instance.inv_transpose = glm::inverseTranspose(world_transform);
+
+                uint64_t key = (uint64_t(node.mesh->mesh_id) << 32) | uint64_t(i);
+
+                auto it = blas_indices.find(key);                               
+                if (it == blas_indices.end()) {                                    
+                    instance.blas_index = m_current_blas_index++;
+                    blas_indices[key] = instance.blas_index;
+                } else {
+                    instance.blas_index = it->second;                                
+                }
+
+                geometries.push_back(instance);
+            }
+        });
+
+        return geometries;
+    }
+
+    return {};
+}
+
+void Scene::ParseObjects(const json &data, const std::unordered_map<std::string, int> &material_ids) {
+    if (!data.contains("objects")) {
+        std::cout << "Scene Error: Every scene must contain an object!" << std::endl;
+        return;
+    }
+
+    // Pass 1: Handle objects and generate base instances
+    std::unordered_map<std::string, std::vector<GeometryInstance>> instances;
+    for (const auto &parsed_object : data["objects"]) {
+        
+        // Insert all basic objects
+        std::vector<GeometryInstance> geometry_instances = ParseObject(parsed_object, material_ids);
+        m_geometries.insert(m_geometries.end(), geometry_instances.begin(), geometry_instances.end());
+
+        // -- Handle instancing --------
+        if (Utils::ToLowercase(parsed_object["TYPE"]) == "instance") {
+            if (!(parsed_object.contains("NAME") && parsed_object.contains("INSTANCE")) && !parsed_object.contains("SOURCE")) {
+                std::cerr << "Warning: Invalid instance object!" << std::endl;
+                return;
+            }
+
+            // -- Instance base --------
+            if (parsed_object.contains("NAME")) {
+                std::string name = parsed_object["NAME"].get<std::string>();
+                instances[name] = ParseObject(parsed_object["INSTANCE"], material_ids);
+            }
+        }
+    }
+
+    // Pass 2: Link all instances
+    for (const auto &parsed_object : data["objects"]) {
+        if (Utils::ToLowercase(parsed_object["TYPE"]) == "instance") {
+            if (!(parsed_object.contains("NAME") && parsed_object.contains("INSTANCE")) && !parsed_object.contains("SOURCE")) {
+                std::cerr << "Warning: Invalid instance object!" << std::endl;
+                return;
+            }
+
+            // -- instance --------
+            if (parsed_object.contains("SOURCE")) {
+                std::string source_ref = parsed_object["SOURCE"].get<std::string>();
+
+                glm::vec3 translate = Utils::GetOrDefault(parsed_object, "TRANS", glm::vec3(0.0f));
+                glm::vec3 rotate = Utils::GetOrDefault(parsed_object, "ROTAT", glm::vec3(0.0f));
+                glm::vec3 scale = Utils::GetOrDefault(parsed_object, "SCALE", glm::vec3(1.0f));
+
+                glm::mat4 instance_transform = Math::GetTransformMatrix(translate, rotate, scale);
+
+                for (const auto &instance : instances[source_ref]) {
+                    GeometryInstance new_instance = instance;
+                    new_instance.transform = instance_transform * new_instance.transform;
+                    new_instance.inv_transform = glm::inverse(new_instance.transform);
+                    new_instance.inv_transpose = glm::inverseTranspose(new_instance.transform);
+
+                    m_geometries.push_back(new_instance);
+                }
+            }
+        }
+    }
+}
+
+void Scene::ComputeLightData() {
+    uint32_t light_count = 0;
+    for (int i = 0; i < m_geometries.size(); ++i) {
+        if (m_materials[m_geometries[i].material_id].type == Material::Type::Emissive) {
+            light_count++;
+        }
+    }
+
+    std::vector<float> light_powers(light_count);
+    m_lights.resize(light_count);
+    m_triangle_samplers.resize(light_count);
+
+    float total_light_power = 0.0f;
+    uint32_t light_index = 0;
+    for (int i = 0; i < m_geometries.size(); ++i) {
+        if (m_materials[m_geometries[i].material_id].type != Material::Type::Emissive) {
+            continue;
+        }
+
+        // Collect triangle areas.
+        float total_area = 0.0f;
+        std::vector<float> tri_areas;
+        tri_areas.reserve(m_geometries[i].triangle_mesh.index_count / 3);
+
+        // TODO: Might be able to save some work and memory for instanced
+        // light sources if we re-use triangle samplers
+        for (int j = 0; j < m_geometries[i].triangle_mesh.index_count; j += 3) {
+            int i0 = m_indices[m_geometries[i].triangle_mesh.first_index + j + 0];
+            int i1 = m_indices[m_geometries[i].triangle_mesh.first_index + j + 1];
+            int i2 = m_indices[m_geometries[i].triangle_mesh.first_index + j + 2];
+
+            glm::vec3 v0 = m_geometries[i].transform * glm::vec4(m_positions[i0], 1.0f);
+            glm::vec3 v1 = m_geometries[i].transform * glm::vec4(m_positions[i1], 1.0f);
+            glm::vec3 v2 = m_geometries[i].transform * glm::vec4(m_positions[i2], 1.0f);
+
+            float area = Math::TriangleArea(v0, v1, v2);
+            total_area += area;
+            tri_areas.push_back(area);
+        }
+
+        // Update geometry and upload triangle sampler. This will be useful for sampling
+        // a random triangle on the mesh with probability based on area
+        m_geometries[i].total_area = total_area;
+        std::cout << "TOTAL_AREA: " << total_area << std::endl;
+
+        m_geometries[i].area_light_id = light_index;
+        m_geometries[i].triangle_sampler_index = light_index;
+
+        m_triangle_samplers[light_index].UpdateWeights(tri_areas);
+
+        // Create the area light itself
+        Material &material = m_materials[m_geometries[i].material_id];
+        float power = total_area * material.emissive.emittance * Math::PI;
+
+        AreaLight light {
+            .power = power,
+            .geometry_instance_index = i,
+        };
+        m_lights[light_index] = std::move(light);
+
+        total_light_power += power;
+        light_powers[light_index] = power;
+
+        light_index++;
+    }
+    m_total_light_power = total_light_power;
+    m_light_sampler.UpdateWeights(light_powers);
+}
+
+void Scene::LoadScene(const std::string &filename) {
     fs::path scene_path = filename;
     fs::path scene_dir = scene_path.parent_path();
     m_scene_dir = scene_dir;
 
-    std::ifstream file(scene_path);
+    // -- Parse scene and load textures --------
+    std::cout << "Parsing Scene..." << std::endl;
 
-    PT_ASSERT(file.is_open(),
-        std::format("ERROR: Could not open file '{}'.", filename));
+    std::ifstream file(scene_path);
+    PT_ASSERT(file.is_open(), std::format("ERROR: Could not open file '{}'.", filename));
 
     json data = json::parse(file);
-    const auto &material_data = data["Materials"];
-    m_materials.reserve(material_data.size());
+    std::string err = "";
 
-    std::unordered_map<std::string, uint32_t> material_ids;
+    m_texture_pool = std::make_unique<TexturePool>();
+    ParseIntegrator(data);
+    ParseCamera(data);
 
-    for (const auto &[key, value] : material_data.items()) {
-        uint32_t mat_id = static_cast<uint32_t>(m_materials.size());
-        material_ids[key] = mat_id;
+    // Handles default textures and materials
+    InitDefaults();
 
-        m_materials.emplace_back();  
-        Material &material = m_materials.back();
+    std::unordered_map<std::string, int> material_ids = ParseMaterials(data);
+    if (material_ids.empty())
+        return;
 
-        if (value["TYPE"] == "Diffuse" || value["TYPE"] == "Lambertian") {
-            material.type = Material::Type::Lambertian;
-            new (&material.mat.lambert) Lambertian{};
+    ParseObjects(data, material_ids);
 
-            LoadTexture(material.mat.lambert.albedo, value["ALBEDO"]);
+    // -- Acceleration structures --------
+    m_bvh = std::make_unique<TLAS>();
+    m_bvh->Build(*this, m_geometries);
 
-        } else if (value["TYPE"] == "Emitting" || value["TYPE"] == "Light") {
-            const auto &color = value["COLOR"];
+    // -- Lights --------
+    ComputeLightData();
 
-            new (&material.mat.light) Light{};
-            material.type = Material::Type::Light;
-
-            material.mat.light = Light{
-                .base_color = glm::vec3(color[0], color[1], color[2]),
-                .emittance = value["EMITTANCE"].is_number() ? value["EMITTANCE"].get<float>() : 1.0f,
-            };
-
-        } else if (value["TYPE"] == "Dielectric") {
-
-            new (&material.mat.dielectric) PerfectDielectric{};
-            material.type = Material::Type::Dielectric;
-
-            LoadTexture(material.mat.dielectric.albedo, value["ALBEDO"]);
-            material.mat.dielectric.ior = value["INDEX_OF_REFRACTION"];
-
-        } else if (value["TYPE"] == "Mirror") {
-
-            new (&material.mat.mirror) PerfectMirror{};
-            material.type = Material::Type::Mirror;
-
-            LoadTexture(material.mat.mirror.albedo, value["ALBEDO"]);
-
-        } else if (value["TYPE"] == "MetallicRoughness") {
-
-            new (&material.mat.metallic_roughness) MetallicRoughness{};
-            material.type = Material::Type::Metallic_Roughness;
-
-            LoadTexture(material.mat.metallic_roughness.albedo, value["ALBEDO"]);
-            LoadTexture(material.mat.metallic_roughness.metallic_map, value["METALLIC"]);
-            LoadTexture(material.mat.metallic_roughness.roughness_map, value["ROUGHNESS"]);
-        } else if (value["TYPE"] == "RoughDielectric") {        
-            
-            new (&material.mat.rough_dielectric) RoughDielectric{};
-            material.type = Material::Type::RoughDielectric;
-
-            LoadTexture(material.mat.rough_dielectric.albedo, value["ALBEDO"]);
-            LoadTexture(material.mat.rough_dielectric.roughness_map, value["ROUGHNESS"]);
-            material.mat.dielectric.ior = value["INDEX_OF_REFRACTION"];
-        }
-        //  else if (value["TYPE"] == "Glass") {
-        //     const auto &color = value["ALBEDO"];
-        //     material.base_color = glm::vec3(color[0], color[1], color[2]);
-        //     material.has_refractive = true;
-        //     material.index_of_refraction = value["INDEX_OF_REFRACTION"];
-
-
-        // } else if (value["TYPE"] == "Dielectric") {
-        //     const auto &color = value["RGB"];
-        //     material.color = glm::vec3(color[0], color[1], color[2]);
-        //     material.has_reflective = true;
-        //     material.has_refractive = true;
-        //     material.index_of_refraction = value["INDEX_OF_REFRACTION"];
-
-        //     std::cout << "DI: "<< material.index_of_refraction << std::endl;
-        // }
-
-        // material_ids[key] = m_materials.size();
-        // m_materials.emplace_back(material);
-    }
-
-    const auto &object_data = data["Objects"];
-    for (const auto &parsed_object : object_data) {
-        const auto &type = parsed_object["TYPE"];
-        Geometry geometry;
-        if (type == "cube") {
-            geometry.type = GeometryType::Cube;
-        } else if (type == "sphere") {
-            geometry.type = GeometryType::Sphere;
-        } else if (type == "gltf") {
-            geometry.type = GeometryType::TriangleMesh;
-        } else {
-            PT_ERROR("Invalid geometry type!");
-        }
-
-        MeshSettings obj_settings;
-
-        if (parsed_object.contains("SETTINGS")) {
-            if (!parsed_object["SETTINGS"].is_array()) {
-                std::cerr << "Scene Warning: object contains SETTINGS but SETTINGS is not an array." << std::endl;
-            }
-
-            const auto &settings = parsed_object["SETTINGS"];
-            for (const auto &setting : settings) {
-                if (!setting.is_string()) {
-                    continue;
-                }
-
-                if (setting == "FLAT_SHADE") {
-                    if (geometry.type != GeometryType::TriangleMesh) {
-                        std::cerr << "Scene Warning: Setting 'FLAT_SHADE' is incompatible with object of type '" << type << "'" << std::endl;
-                    }
-
-                    obj_settings.flat_shade = true;
-                }
-            }
-        }
-
-        geometry.material_id = material_ids[parsed_object["MATERIAL"]];
-        const auto &trans = parsed_object["TRANS"];
-        const auto &rotat = parsed_object["ROTAT"];
-        const auto &scale = parsed_object["SCALE"];
-
-        geometry.translation = glm::vec3(trans[0], trans[1], trans[2]);
-        geometry.rotation = glm::vec3(rotat[0], rotat[1], rotat[2]);
-        geometry.scale = glm::vec3(scale[0], scale[1], scale[2]);
-
-        glm::mat4 trans_mat = glm::translate(glm::mat4(1.0f), geometry.translation);
-        glm::mat4 rot_mat = glm::mat4(1.0f);
-        rot_mat *= glm::rotate(glm::mat4(1.0f), glm::radians(geometry.rotation.x), glm::vec3(1, 0, 0));
-        rot_mat *= glm::rotate(glm::mat4(1.0f), glm::radians(geometry.rotation.y), glm::vec3(0, 1, 0));
-        rot_mat *= glm::rotate(glm::mat4(1.0f), glm::radians(geometry.rotation.z), glm::vec3(0, 0, 1));
-        glm::mat4 scale_mat = glm::scale(glm::mat4(1.0f), geometry.scale);
-        
-        geometry.transform = trans_mat * rot_mat * scale_mat;
-        geometry.inv_transform = glm::inverse(geometry.transform);
-        geometry.inv_transpose = glm::inverseTranspose(geometry.transform);
-
-        if (geometry.type != GeometryType::TriangleMesh) {
-            m_geometry.push_back(geometry);
-        } else {
-            GLTF::GLTFModel model(obj_settings);
-            const std::string &file = parsed_object["PATH"];
-            if (file.empty()) {
-                PT_ERROR("Missing PATH for gLTF object type!");
-            }
-
-            fs::path model_path = file;
-            if (model_path.is_relative()) {
-                model_path = scene_dir / model_path;
-            }
-            if (!fs::exists(model_path))
-                PT_ERROR("glTF file not found: " + model_path.string());
-
-            model.LoadGLTF(model_path.string());
-
-            uint32_t base_vertex = static_cast<uint32_t>(m_vertices.size());
-            uint32_t base_index = static_cast<uint32_t>(m_indices.size());
-            m_vertices.insert(m_vertices.end(), model.Vertices().begin(), model.Vertices().end());
-            for (auto idx : model.Indices())
-                m_indices.push_back(idx + base_vertex);
-
-            model.ForEachNode([&](GLTF::SceneNode &node) {
-                if (!node.mesh)
-                    return;
-
-                glm::mat4 node_transform = geometry.transform * node.LocalMatrix();
-                for (auto &primitive : node.mesh->primitives) {
-                    Geometry geom_copy = geometry;
-                    TriangleMesh tri_mesh {
-                        .first_index = base_index + primitive.first_index,
-                        .index_count = primitive.index_count,
-                        .first_vertex = base_vertex,
-                        .vertex_count = primitive.vertex_count,
-                    };
-                    geom_copy.transform = node_transform;
-                    geom_copy.inv_transform = glm::inverse(node_transform);
-                    geom_copy.inv_transpose = glm::inverseTranspose(node_transform);
-                    geom_copy.mesh = tri_mesh;
-                    m_geometry.push_back(geom_copy);
-                    // std::cout << "ADDED geometry prim" << std::endl;
-                }
-            });
-
-            
-        }
-    }
-
-    const auto &camera_data = data["Camera"];
-    Camera &camera = m_state.camera;
-    RenderState &state = m_state;
-
-    camera.resolution = { camera_data["RES"][0], camera_data["RES"][1] };
-    float fovy = camera_data["FOVY"];
-    state.iterations = camera_data["ITERATIONS"];
-    state.trace_depth = camera_data["DEPTH"];
-    state.output_name = camera_data["FILE"];
-    const auto &pos = camera_data["EYE"];
-    const auto &lookat = camera_data["LOOKAT"];
-    const auto &up = camera_data["UP"];
-
-    camera.position = glm::vec3(pos[0], pos[1], pos[2]);
-    camera.look_at = glm::vec3(lookat[0], lookat[1], lookat[2]);
-    // camera.up = glm::vec3(up[0], up[1], up[2]);
-
-    float yscaled = glm::tan(glm::radians(fovy));
-    float xscaled = (yscaled * camera.resolution.x) / camera.resolution.y;
-
-    camera.front = glm::normalize(camera.look_at - camera.position);
-    camera.right = glm::normalize(glm::cross(glm::vec3(0,1,0), camera.front));
-    camera.up = glm::cross(camera.front, camera.right);
-
-    camera.pixel_length = glm::vec2(2 * xscaled / (float)camera.resolution.x,
-        2 * yscaled / (float)camera.resolution.y);
-
-    state.image.SetSize(camera.resolution.x, camera.resolution.y);
-
-    camera.default_params.front = camera.front;
-    camera.default_params.position = camera.position;
-    camera.default_params.look_at = camera.look_at;
-
-    InitGeometry();
-    UploadToGPU();
-
-    std::cout << "Finished loading scene!\n";
-}
-
-void Scene::UploadToGPU() {
-    m_view.geometry_count = CopyToDevice(m_view.geometries, m_geometry);
-    m_view.material_count = CopyToDevice(m_view.materials, m_materials);
-    m_view.vertex_count = CopyToDevice(m_view.vertices, m_vertices);
-    m_view.index_count = CopyToDevice(m_view.indices, m_indices);
-
-    m_view.bvh_node_count = CopyToDevice(m_view.bvh_nodes, m_bvh_nodes);
-    m_view.bvh_indices_count = CopyToDevice(m_view.bvh_tri_indices, m_bvh_tri_indices);
-    m_view.light_count = CopyToDevice(m_view.lights, m_area_lights);
-}
-
-void Scene::InitGeometry() {
-    int geometry_count = m_geometry.size();
-    float scene_light_power = 0.0f;
-    
-    for (int i = 0; i < geometry_count; ++i) {
-        auto &geom = m_geometry[i];
-        if (m_materials[geom.material_id].type == Material::Type::Light) {
-            float emittance = m_materials[geom.material_id].mat.light.emittance;
-            switch (geom.type) {
-                case GeometryType::TriangleMesh: {
-                    float total_area = 0.0f;
-                    std::vector<float> areas;
-                    areas.reserve(geom.mesh.index_count / 3);
-                    for (uint32_t j = 0; j < geom.mesh.index_count; j += 3) {
-                        uint32_t j0 = m_indices[geom.mesh.first_index + j];
-                        uint32_t j1 = m_indices[geom.mesh.first_index + j+1];
-                        uint32_t j2 = m_indices[geom.mesh.first_index + j+2];
-                        glm::vec3 p0 = m_vertices[j0].position;
-                        glm::vec3 p1 = m_vertices[j1].position;
-                        glm::vec3 p2 = m_vertices[j2].position;
-
-                        glm::vec3 w0 = glm::vec3(geom.transform * glm::vec4(p0,1.0f));
-                        glm::vec3 w1 = glm::vec3(geom.transform * glm::vec4(p1,1.0f));
-                        glm::vec3 w2 = glm::vec3(geom.transform * glm::vec4(p2,1.0f));
-
-                        glm::vec3 e0 = w1 - w0;
-                        glm::vec3 e1 = w2 - w0;
-                        float tri_area = 0.5f * glm::length(glm::cross(e0, e1));
-
-                        total_area += tri_area;
-                        areas.push_back(tri_area);
-                    }
-                    DiscreteSampler1D triangle_sampler(areas);
-                    m_geometry[i].triangle_sampler = triangle_sampler.View();
-                    
-                    AreaLight light {
-                        .geometry_id = i,
-                        .power = total_area * emittance * c_PI,
-                        .area = total_area,
-                    };
-                    scene_light_power += light.power;
-                    m_materials[geom.material_id].mat.light.light_id = m_area_lights.size();
-                    m_area_lights.push_back(light);
-                    break;
-                }
-                case GeometryType::Sphere: {
-                    AreaLight light {
-                        .geometry_id = i,
-                        .power = c_PI * emittance * c_PI,
-                        .area = c_PI,
-                    };
-                    scene_light_power += light.power;
-                    m_materials[geom.material_id].mat.light.light_id = m_area_lights.size();
-                    m_area_lights.push_back(light);
-                    break;
-                }
-                case GeometryType::Cube: {
-                    AreaLight light {
-                        .geometry_id = i,
-                        .power = 6.0f * emittance * c_PI,
-                        .area = 6.0f,
-                    };
-                    scene_light_power += light.power;
-                    m_materials[geom.material_id].mat.light.light_id = m_area_lights.size();
-                    m_area_lights.push_back(light);
-                    break;
-                }
-            }
-        }
-
-        if (geom.type != GeometryType::TriangleMesh)
-            continue;
-        
-        BVH::BVH bvh(geom, m_vertices, m_indices);
-        bvh.Build();
-
-        const uint32_t base_node = static_cast<uint32_t>(m_bvh_nodes.size());
-        const uint32_t base_tri = static_cast<uint32_t>(m_bvh_tri_indices.size());
-
-        for (const BVH::BVHNode &src : bvh.Nodes()) {
-            BVH::BVHNode n = src;
-
-            if (n.left_child != UINT32_MAX)
-                n.left_child += base_node;
-
-            m_bvh_nodes.push_back(n);
-        }
-
-        m_bvh_tri_indices.insert(m_bvh_tri_indices.end(), bvh.TriIndices().begin(), bvh.TriIndices().end());
-
-        geom.first_bvh_node = base_node;
-        geom.bvh_node_count = bvh.Nodes().size();
-
-        geom.first_tri_index = base_tri;
-        geom.tri_index_count = bvh.TriIndices().size();
-    }
-
-    m_view.total_light_power = scene_light_power;
-
-    std::vector<float> powers(m_area_lights.size());
-    for (uint32_t i = 0; i < m_area_lights.size(); ++i) {
-        powers[i] = m_area_lights[i].power;
-    }
-    DiscreteSampler1D light_sampler(powers);
-    m_view.light_sampler = light_sampler.View();
+    m_dirty = true;
+    m_texture_pool->dirty = true;
+    m_bvh->Dirty() = true;
+    m_camera->Dirty() = true;
 }

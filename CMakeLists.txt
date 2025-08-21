@@ -10,6 +10,8 @@ set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 # Dev
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
@@ -34,6 +36,12 @@ set(TINYGLTF_BUILD_LOADER_EXAMPLE OFF CACHE BOOL "" FORCE)
 set(TINYGLTF_INSTALL_VENDOR OFF CACHE BOOL "" FORCE)
 set(TINYGLTF_INSTALL OFF CACHE BOOL "" FORCE)
 add_subdirectory(third_party/tinygltf)
+
+## TinyObjLoader
+add_library(tinyobjloader
+    third_party/tinyobjloader/tiny_obj_loader.cpp
+)
+target_include_directories(tinyobjloader PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/tinyobjloader)
 
 ## STB
 add_library(stb
@@ -81,28 +89,72 @@ add_subdirectory(third_party/json)
 
 # Source
 
-file(GLOB_RECURSE CORE_SOURCES CONFIGURE_DEPENDS
-    src/*.cpp src/*.cu src/*.h)
+# -- CUDA Sources ----
 
-add_executable(${CMAKE_PROJECT_NAME} ${CORE_SOURCES})
+file(GLOB_RECURSE CUDA_SOURCES CONFIGURE_DEPENDS src/kernel/*.cu)
 
-target_compile_options(${PROJECT_NAME} PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>)
-
-set_target_properties(${CMAKE_PROJECT_NAME} PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+add_library(cuda_kernels STATIC ${CUDA_SOURCES})
+set_target_properties(cuda_kernels PROPERTIES
+    CUDA_SEPARABLE_COMPILATION ON
+    CUDA_RESOLVE_DEVICE_SYMBOLS ON
+)
+target_compile_options(cuda_kernels PRIVATE
+    --expt-relaxed-constexpr
+    $<$<CONFIG:Debug>:-G;-src-in-ptx>
+    $<$<CONFIG:RelWithDebInfo>:-lineinfo;-src-in-ptx>
+)
 if(CMAKE_VERSION VERSION_LESS "3.23.0")
-    set_target_properties(${CMAKE_PROJECT_NAME} PROPERTIES CUDA_ARCHITECTURES OFF)
+    set_target_properties(cuda_kernels PROPERTIES CUDA_ARCHITECTURES OFF)
 elseif(CMAKE_VERSION VERSION_LESS "3.24.0")
-    set_target_properties(${CMAKE_PROJECT_NAME} PROPERTIES CUDA_ARCHITECTURES all-major)
+    set_target_properties(cuda_kernels PROPERTIES CUDA_ARCHITECTURES all-major)
 else()
-    set_target_properties(${CMAKE_PROJECT_NAME} PROPERTIES CUDA_ARCHITECTURES native)
+    set_target_properties(cuda_kernels PROPERTIES CUDA_ARCHITECTURES native)
 endif()
 
-target_link_libraries(${CMAKE_PROJECT_NAME}
+target_link_libraries(cuda_kernels PUBLIC
     CUDA::cudart
     CUDA::cuda_driver
+    glm::glm
+)
+
+# -- C++ Sources ----
+
+file(GLOB_RECURSE CORE_SOURCES CONFIGURE_DEPENDS src/*.cpp src/*.h)
+
+add_executable(${PROJECT_NAME} ${CORE_SOURCES})
+target_compile_options(${PROJECT_NAME} PRIVATE
+    $<$<CONFIG:Debug>:
+        $<$<CXX_COMPILER_ID:GNU,Clang>:-g>
+        $<$<CXX_COMPILER_ID:MSVC>: /Zi>
+    >
+    $<$<CONFIG:RelWithDebInfo>:
+        $<$<CXX_COMPILER_ID:GNU,Clang>:-O2 -gline-tables-only -fdebug-types-section>
+        $<$<CXX_COMPILER_ID:MSVC>:/O2 /Zi /Oy->
+    >
+)
+
+target_link_options(${PROJECT_NAME} PRIVATE
+    $<$<CONFIG:RelWithDebInfo>:
+        $<$<CXX_COMPILER_ID:MSVC>:/DEBUG /OPT:REF /OPT:ICF>
+    >
+)
+
+set_target_properties(${PROJECT_NAME} PROPERTIES
+  PDB_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/pdb"
+  PDB_NAME "${PROJECT_NAME}"
+)
+
+set_target_properties(${PROJECT_NAME} PROPERTIES
+  COMPILE_PDB_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/pdb"
+  COMPILE_PDB_NAME "${PROJECT_NAME}_obj"
+)
+
+target_link_libraries(${PROJECT_NAME}
+    cuda_kernels
     stb
     glfw
     tinygltf
+    tinyobjloader
     glm::glm
     volk::volk
     VulkanMemoryAllocator
@@ -110,8 +162,4 @@ target_link_libraries(${CMAKE_PROJECT_NAME}
     nlohmann_json
 )
 
-target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE "$<$<AND:$<CONFIG:Debug,RelWithDebInfo>,$<COMPILE_LANGUAGE:CUDA>>:-G;-src-in-ptx>")
-target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE "$<$<AND:$<CONFIG:Release>,$<COMPILE_LANGUAGE:CUDA>>:-lineinfo;-src-in-ptx>")
-
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT ${CMAKE_PROJECT_NAME})
-

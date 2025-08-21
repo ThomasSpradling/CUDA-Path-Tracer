@@ -2,7 +2,7 @@
   "integrator": {
     "TYPE": "path",
     "DEPTH": 100,
-    "ITERATIONS": 1024
+    "ITERATIONS": 8192
   },
   "camera": {
     "TYPE": "pinhole",
@@ -27,7 +27,7 @@
       "TYPE": "emitting",
       "RADIANCE": {
         "RGB": [0.98, 0.98, 0.98],
-        "EMITTANCE": 10.0
+        "EMITTANCE": 5.0
       }
     },
     "diffuse_white": {
@@ -82,54 +82,54 @@
       "TYPE": "obj",
       "PATH": "plane.obj",
       "MATERIAL": "light",
-      "TRANS": [0.0, 9.999, 0.0],
+      "TRANS": [0.0, 9.9, 0.0],
       "ROTAT": [180.0, 0.0, 0.0],
       "SCALE": [1.5, 1.0, 1.5],
       "FACE_NORMALS": true
     },
     {
-      "TYPE": "obj",
-      "PATH": "plane.obj",
+      "TYPE": "gltf",
+      "PATH": "cube.gltf",
       "MATERIAL": "diffuse_white",
       "TRANS": [0.0, 0.0, 0.0],
       "ROTAT": [0.0, 0.0, 0.0],
-      "SCALE": [5.0, 1.0, 5.0],
+      "SCALE": [1.0, 0.001, 1.0],
       "FACE_NORMALS": true
     },
     {
-      "TYPE": "obj",
-      "PATH": "plane.obj",
+      "TYPE": "gltf",
+      "PATH": "cube.gltf",
       "MATERIAL": "diffuse_white",
       "TRANS": [0.0, 10.0, 0.0],
-      "ROTAT": [180.0, 0.0, 0.0],
-      "SCALE": [5.0, 1.0, 5.0],
+      "ROTAT": [0.0, 0.0, 90.0],
+      "SCALE": [0.001, 1.0, 1.0],
       "FACE_NORMALS": true
     },
     {
-      "TYPE": "obj",
-      "PATH": "plane.obj",
+      "TYPE": "gltf",
+      "PATH": "cube.gltf",
       "MATERIAL": "diffuse_white",
       "TRANS": [0.0, 5.0, -5.0],
-      "ROTAT": [90.0, 0.0, 0.0],
-      "SCALE": [5.0, 1.0, 5.0],
+      "ROTAT": [0.0, 90.0, 0.0],
+      "SCALE": [0.001, 1.0, 1.0],
       "FACE_NORMALS": true
     },
     {
-      "TYPE": "obj",
-      "PATH": "plane.obj",
+      "TYPE": "gltf",
+      "PATH": "cube.gltf",
       "MATERIAL": "diffuse_red",
       "TRANS": [-5.0, 5.0, 0.0],
-      "ROTAT": [0.0, 0.0, -90.0],
-      "SCALE": [5.0, 1.0, 5.0],
+      "ROTAT": [0.0, 0.0, 0.0],
+      "SCALE": [0.001, 1.0, 1.0],
       "FACE_NORMALS": true
     },
     {
-      "TYPE": "obj",
-      "PATH": "plane.obj",
+      "TYPE": "gltf",
+      "PATH": "cube.gltf",
       "MATERIAL": "diffuse_green",
       "TRANS": [5.0, 5.0, 0.0],
-      "ROTAT": [0.0, 0.0, 90.0],
-      "SCALE": [5.0, 1.0, 5.0],
+      "ROTAT": [0.0, 0.0, 0.0],
+      "SCALE": [0.001, 1.0, 1.0],
       "FACE_NORMALS": true
     },
     {
@@ -138,7 +138,7 @@
       "MATERIAL": "rough",
       "TRANS": [-2.0, 6.0, -1.0],
       "ROTAT": [0.0, -60.0, 0.0],
-      "SCALE": [0.1, 0.1, 0.1]
+      "SCALE": [0.1,0.1,0.1]
     },
     {
       "TYPE": "gltf",

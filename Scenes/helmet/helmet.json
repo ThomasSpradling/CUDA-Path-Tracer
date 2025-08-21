@@ -1,0 +1,162 @@
+{
+  "integrator":
+  {
+    "TYPE": "path",
+    "DEPTH": 8,
+    "ITERATIONS": 8124
+  },
+  "camera":
+  {
+    "TYPE": "pinhole",
+    "FOVY": 45.0,
+    "EYE": [0.0, 0.0, 5.0],
+    "LOOKAT": [0.0, 0.0, 0.0],
+    "UP": [0.0, 1.0, 0.0],
+
+    "film":
+    {
+      "WIDTH": 1920,
+      "HEIGHT": 1080,
+      "COLOR_SPACE": "rgb"
+    },
+
+    "sampler":
+    {
+      "TYPE": "independent"
+    },
+
+    "reconstruction_filter":
+    {
+      "TYPE": "box"
+    }
+  },
+  "materials":
+  {
+    "key_light": {
+      "TYPE": "emitting",
+      "RADIANCE": {
+        "RGB": [0.98, 0.98, 0.98],
+        "EMITTANCE": 20.0
+      }
+    },
+    "fill_light": {
+      "TYPE": "emitting",
+      "RADIANCE": {
+        "RGB": [0.98, 0.98, 0.98],
+        "EMITTANCE": 20.0
+      }
+    },
+    "back_light": {
+      "TYPE": "emitting",
+      "RADIANCE": {
+        "RGB": [0.5, 0.30, 0.98],
+        "EMITTANCE": 40.0
+      }
+    },
+    "diffuse_white": {
+      "TYPE": "diffuse",
+      "ALBEDO": {
+        "RGB": [0.85, 0.85, 0.85]
+      }
+    },
+    "diffuse_red": {
+      "TYPE": "diffuse",
+      "ALBEDO": {
+        "RGB": [0.85, 0.35, 0.35]
+      }
+    },
+    "diffuse_blue": {
+      "TYPE": "diffuse",
+      "ALBEDO": {
+        "RGB": [0.35, 0.35, 0.85]
+      }
+    },
+    "mirror": {
+      "TYPE": "mirror",
+      "ALBEDO": {
+        "RGB": [0.35, 0.35, 0.35]
+      }
+    },
+    "metal": {
+      "TYPE": "metallic_roughness",
+      "ALBEDO": {
+        "RGB": [0.2, 0.2, 0.2]
+      },
+      "ROUGHNESS": {
+        "VALUE": 0.01
+      },
+      "METALLIC": {
+        "VALUE": 1.0
+      }
+    },
+    "glass": {
+      "TYPE": "dielectric",
+      "ALBEDO": {
+        "RGB": [0.98, 0.98, 0.98]
+      },
+      "IOR": 1.2
+    },
+    "diffuse_green": {
+      "TYPE": "diffuse",
+      "ALBEDO": {
+        "RGB": [0.35, 0.85, 0.35]
+      }
+    }
+  },
+  "objects":
+  [
+    {
+      "TYPE": "gltf",
+      "PATH": "sphere/sphere.gltf",
+      "MATERIAL": "key_light",
+      "TRANS":[0.0, 3.0, 10.0],
+      "ROTAT":[0.0, 0.0, 0.0],
+      "SCALE":[2.0, 2.0, 2.0],
+      "FACE_NORMALS": true
+    },
+    {
+      "TYPE": "gltf",
+      "PATH": "sphere/sphere.gltf",
+      "MATERIAL": "fill_light",
+      "TRANS":[5.0, 0.0, 7.0],
+      "ROTAT":[0.0, 0.0, 0.0],
+      "SCALE":[1.0, 1.0, 1.0],
+      "FACE_NORMALS": true
+    },
+    {
+      "TYPE": "gltf",
+      "PATH": "sphere/sphere.gltf",
+      "MATERIAL": "back_light",
+      "TRANS":[8.0, 0.0, -1.0],
+      "ROTAT":[0.0, 0.0, 0.0],
+      "SCALE":[1.0, 1.0, 1.0],
+      "FACE_NORMALS": true
+    },
+    {
+      "TYPE": "gltf",
+      "PATH": "helmet/DamagedHelmet.gltf",
+      "TRANS":[0.0, 0.0, 0.0],
+      "ROTAT":[0.0, 0.0, 0.0],
+      "SCALE":[1.0, 1.0, 1.0],
+      "FACE_NORMALS": false
+    },
+    {
+      "TYPE": "gltf",
+      "PATH": "helmet/DamagedHelmet.gltf",
+      "MATERIAL": "diffuse_green",
+      "TRANS":[2.0, 0.0, 0.0],
+      "ROTAT":[0.0, 0.0, 0.0],
+      "SCALE":[1.0, 1.0, 1.0],
+      "FACE_NORMALS": false
+    },
+    {
+      "TYPE": "gltf",
+      "PATH": "helmet/DamagedHelmet.gltf",
+      "MATERIAL": "diffuse_red",
+      "TRANS":[-2.0, 0.0, 0.0],
+      "ROTAT":[0.0, 0.0, 0.0],
+      "SCALE":[1.0, 1.0, 1.0],
+      "FACE_NORMALS": false
+    }
+  ]
+}

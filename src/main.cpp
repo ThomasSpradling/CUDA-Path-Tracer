@@ -1,5 +1,4 @@
-#include "PathTracerApplication.h"
-#include <exception>
+#include "application.h"
 #include <iostream>
 
 int main(int argc, char *argv[]) {
@@ -7,10 +6,11 @@ int main(int argc, char *argv[]) {
         .renderer_properties = {
             .vulkan_version = VK_MAKE_API_VERSION(0, 1, 3, 0),
             .enable_validation = false,
-            .enable_present = true,
-            .window_width = 800,
-            .window_height = 800,   
+            .enable_vsync = false,
+            .render_offscreen = false,
+            .continue_offscreen_if_minimized = true,
         },
+        .stop_at_max_iterations = false,
     };
 
     if (argc < 2) {
@@ -21,7 +21,7 @@ int main(int argc, char *argv[]) {
     properties.input_scene_name = argv[1];
 
     try {
-        PathTracerApplication path_tracer(properties);
+        Application path_tracer(properties);
         path_tracer.Run();
     } catch (const std::exception &e) {
         std::cerr << e.what() << std::endl;

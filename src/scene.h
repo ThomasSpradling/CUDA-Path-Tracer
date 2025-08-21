@@ -1,159 +1,199 @@
 #pragma once
 
-#include <cstdint>
+#include "image.h"
+#include "kernel/device_types.h"
+#include "kernel/device_scene.h"
+#include "discrete_sampler.h"
+#include "camera.h"
+#include "bvh.h"
+#include "kernel/integrators/integrator.h"
+#include "texture.h"
+#include "mesh/gltf_model.h"
+#include "utils/device_buffer.h"
+#include "utils/utils.h"
+
+#include <iostream>
+#include <memory>
+#include <nlohmann/json.hpp>
 #include <string>
 #include <vector>
-#include "Image.h"
-#include <glm/glm.hpp>
-#include <glm/gtc/matrix_transform.hpp>
-#include <glm/gtc/matrix_inverse.hpp>
-#include "geometry.h"
 
-#include <cuda_runtime.h>
-#include <nlohmann/json.hpp>
-#include "material.h"
-#include "Samplers.h"
-#include "SceneView.h"
-
-// struct Material {
-//     glm::vec3 color;
-//     struct {
-//         float exponent;
-//         glm::vec3 color;
-//     } specular;
-
-//     bool has_reflective = false;
-//     bool has_refractive = false;
-//     float index_of_refraction;
-//     float emittance;
-// };
-
-struct Camera {
-    struct Default {
-        glm::vec3 front { 0.0f, 0.0f, -1.0f };
-        glm::vec3 look_at {};
-        glm::vec3 position { 0.0f, 0.0f, -1.0f };
-    } default_params;
-
-    glm::ivec2 resolution { 0, 0 };
-    glm::vec3 position {};
-    glm::vec3 look_at { 0.0f, 0.0f, -1.0f };
-
-    glm::vec3 front { 0.0f, 0.0f, -1.0f };
-    glm::vec3 up { 0.0f, 1.0f, 0.0f };
-    glm::vec3 right { 1.0f, 0.0f, 0.0f };
-
-    float fovy;
-    glm::vec2 pixel_length;
-};
-
-struct RenderState {
-    Camera camera {};
-    uint32_t iterations;
-    int trace_depth;
-    Image3 image;
-    std::string output_name;
-};
-
-struct PathSegment {
-    Ray ray;
-    glm::vec3 throughput;
-    glm::vec3 color_accum;
-    int pixel_index;
-    int remaining_bounces;
-
-    glm::vec3 last_pos;
-    float last_pdf;
-
-    bool hit = false;
-};
+using json = nlohmann::json;
 
 class Scene {
 public:
     Scene(const std::string &filename);
-    ~Scene() = default;
+    ~Scene();
 
-    RenderState &State() { return m_state; }
-    const RenderState &State() const { return m_state; }
+    inline glm::ivec2 GetResolution() const { return m_camera->m_film.m_resolution; }
+    inline void SetResolution(glm::ivec2 resolution) { m_camera->m_film.m_resolution = resolution; }
 
-    std::vector<Geometry> &Geometries() { return m_geometry; }
-    const std::vector<Geometry> &Geometries() const { return m_geometry; }
+    bool UpdateDevice();
+    const DeviceScene &GetDeviceScene() const { return m_device_scene; };
 
-    std::vector<Material> &Materials() { return m_materials; }
-    const std::vector<Material> &Materials() const { return m_materials; }
+    int MaxIterations() const { return m_max_iterations; }
 
-    int VertexCount() const { return m_vertices.size(); }
-    const std::vector<MeshVertex> &Vertices() const { return m_vertices; }
-    
-    int IndexCount() const { return m_indices.size(); }
+    Camera &GetCamera() { return *m_camera; }
+    const Camera &GetCamera() const { return *m_camera; }
+
+    const std::vector<glm::vec3> &Positions() const { return m_positions; }
     const std::vector<uint32_t> &Indices() const { return m_indices; }
-
-    inline const SceneView &View() const { return m_view; }
 private:
-    std::vector<AreaLight> m_area_lights;
-    std::vector<Geometry> m_geometry;
-    std::vector<Material> m_materials;
-    RenderState m_state;
+    bool m_dirty = false;
 
-    std::vector<MeshVertex> m_vertices;
+    IntegratorType m_integrator;
+    int m_max_depth;
+    int m_max_iterations;
+
+    SamplerType m_sampler;
+    
+    // Vertex data
+    std::vector<glm::vec3> m_positions;
+    std::vector<glm::vec3> m_normals;
+    std::vector<glm::vec2> m_texcoords;    
     std::vector<uint32_t> m_indices;
 
-    std::vector<BVH::BVHNode> m_bvh_nodes;
-    std::vector<uint32_t> m_bvh_tri_indices;
+    std::vector<GeometryInstance> m_geometries;
 
-    SceneView m_view;
+    std::vector<DiscreteSampler1D> m_triangle_samplers;
+
+    // BVH Data
+    std::unique_ptr<TLAS> m_bvh;
+
+    std::vector<Material> m_materials;
+    std::unique_ptr<TexturePool> m_texture_pool {};
+
+    std::vector<AreaLight> m_lights;
+    DiscreteSampler1D m_light_sampler;
+    float m_total_light_power = 0.0f;
+
+    std::unique_ptr<Camera> m_camera;
+    DeviceScene m_device_scene;
+
     fs::path m_scene_dir;
+    uint32_t m_current_blas_index = 0;
 private:
-    void LoadFromJSON(const std::string &filename);
-    Texture<glm::vec3> LoadTexture3D(const nlohmann::json &parsed_texture);
-
-    void InitGeometry();
-    void UploadToGPU();
-
     template<typename T>
-    void LoadTexture(Texture<T> &texture, const nlohmann::json &parsed_texture) {
+    int ParseTexture(const json &parsed_texture, int channel = 0, bool is_albedo_texure = false) {
+        int texture_id;
+        if constexpr (std::is_same_v<T, float>) {
+            texture_id = m_texture_pool->textures1.size();
+        } else if constexpr (std::is_same_v<T, glm::vec3>) {
+            texture_id = m_texture_pool->textures3.size();
+        }
+
         if (parsed_texture.contains("PATH")) {
             const auto &path = parsed_texture["PATH"];
             if (!path.is_string()) {
-                std::cerr << "Scene Warning: Invalid path: '" << path << "'!" << std::endl;
+                std::cerr << std::format("Scene Warning: Invalid path: '%s'!", path.get<std::string>()) << std::endl;
+
+                // The 0-th texture will always just be a constant white texture
+                return 0;
             }
 
-            if (auto resolved = ResolvePath(path, m_scene_dir)) {
-                texture.type = TextureType::ImageTexture;
-                texture.tex.image_texture.LoadTexture(resolved->string());
-                texture.tex.image_texture.m_offset = glm::vec2(0.0f);
-                texture.tex.image_texture.m_scale = glm::vec2(1.0f);
-                return;
+            if (auto resolved = Utils::ResolvePath(path, m_scene_dir)) {
+                Texture<T> texture;
+
+                texture.type = TextureType::Image;
+
+                if constexpr (std::is_same_v<T, float>) {
+                    texture.image.image_id = m_texture_pool->images1.size();
+
+                    m_texture_pool->images1.emplace_back();
+
+                    Image1 &image = m_texture_pool->images1.back();
+                    LoadImageFromFile(m_texture_pool->images1.back(), *resolved, channel);
+
+                    texture.image.width = image.Width();
+                    texture.image.height = image.Height();
+                } else if constexpr (std::is_same_v<T, glm::vec3>) {
+                    texture.image.image_id = m_texture_pool->images3.size();
+
+                    m_texture_pool->images3.emplace_back();
+
+                    Image3 &image = m_texture_pool->images3.back();
+                    LoadImageFromFile(image, *resolved);
+
+                    if (is_albedo_texure) {
+                        image.SetColorSpace(ColorSpace::sRGB);
+                    }
+
+                    texture.image.width = image.Width();
+                    texture.image.height = image.Height();
+                }
+
+                texture.image.offset = glm::vec2(0.0f);
+                texture.image.scale = glm::vec2(1.0f);
+
+                if constexpr (std::is_same_v<T, float>) {
+                    m_texture_pool->textures1.push_back(texture);
+                } else if constexpr (std::is_same_v<T, glm::vec3>) {
+                    m_texture_pool->textures3.push_back(texture);
+                }
+                return texture_id;
             }
         }
 
-        if constexpr (std::is_same_v<T, glm::vec3>) {
-            if (parsed_texture.contains("RGB")) {
-                const auto &c = parsed_texture["RGB"];
-                if (!c.is_array() || c.size() != 3) {
-                    std::cerr << "Scene Warning: Expected RGB color to have 3 components!" << std::endl;
-                    texture = glm::vec3(0.0f);
-                }
-    
-                texture = glm::vec3(c[0], c[1], c[2]);
-                return;
-            }
-        } else if constexpr (std::is_same_v<T, float>) {
+        if (channel > 0) {
+            std::cerr << "Nontrivial channels are incompatible with non-image textures!" << std::endl;
+        }
+
+        if constexpr (std::is_same_v<T, float>) {
             if (parsed_texture.contains("VALUE")) {
                 const auto &c = parsed_texture["VALUE"];
                 if (!c.is_number()) {
                     std::cerr << "Scene Warning: Expected value to be float!" << std::endl;
-                    texture = 0.0f;
+                    return 0;
                 }
-    
-                texture = c;
-                return;
+
+                Texture<T> texture;
+
+                texture.type = TextureType::Constant;
+                texture.constant.value = static_cast<float>(c);
+                
+                m_texture_pool->textures1.push_back(texture);
+
+                return texture_id;
+            }
+        } else if constexpr (std::is_same_v<T, glm::vec3>) {
+            if (parsed_texture.contains("RGB")) {
+                const auto &c = parsed_texture["RGB"];
+                if (!c.is_array() || c.size() != 3) {
+                    std::cerr << "Scene Warning: Expected RGB color to have 3 components!" << std::endl;
+                    return 0;
+                }
+
+                Texture<T> texture;
+
+                texture.type = TextureType::Constant;
+                texture.constant.value = Utils::ParseVector(c, glm::vec3(0.0f));
+                
+                m_texture_pool->textures3.push_back(texture);
+
+                return texture_id;
             }
         }
 
-        std::cerr << "Invalid texture: \n";
-
-        texture = T(0.0f);
-        return;
+        std::cerr << "Invalid texture.\n";
+        return 0;
     }
+
+    template<typename T>
+    uint32_t LoadTextureOrZero(const json &mat, const std::string &key, int channel = 0, bool is_albedo_texure = false) {
+        return mat.contains(key)
+            ? ParseTexture<T>(mat[key], channel, is_albedo_texure)
+            : 0;
+    }
+
+    void ComputeLightData();
+
+    void ParseIntegrator(const json &data);
+    void ParseCamera(const json &data);
+    void InitDefaults();
+    bool ParseMaterial(const json &material);
+    std::unordered_map<std::string, int> ParseMaterials(const json &data);
+    
+    std::vector<GeometryInstance> ParseObject(const json &parsed_object, const std::unordered_map<std::string, int> &material_ids);
+    void ParseObjects(const json &data, const std::unordered_map<std::string, int> &material_ids);
+    void LoadScene(const std::string &filename);
 };
